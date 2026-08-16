@@ -1,0 +1,165 @@
+/*
+ * Void Radio progress bar.
+ *
+ * Draws a rounded rectangle in one pass: a background layer, a progress layer
+ * masked to the current playback position, and an optional border on top. Each
+ * layer is a solid colour, a linear gradient, or a texture (an image file or
+ * another source rendered to a texture by the plugin).
+ *
+ * All coordinates are in the bar's own pixel space so that antialiasing is a
+ * flat one pixel wide regardless of how the source is scaled in the scene.
+ */
+
+uniform float4x4 ViewProj;
+
+uniform float2 bar_size;
+uniform float corner_radius;
+uniform float border_width;
+uniform float4 border_color;
+
+uniform float progress;  /* 0..1 */
+uniform float direction; /* 0 L>R, 1 R>L, 2 B>T, 3 T>B, 4 centre out */
+
+/* Idle sweep: a travelling highlight used when nothing is playing. */
+uniform float sweep_active;
+uniform float sweep_pos;
+uniform float sweep_half;
+
+uniform float bg_mode; /* 0 colour, 1 gradient, 2 texture */
+uniform float4 bg_color;
+uniform float4 bg_color2;
+uniform float2 bg_gradient;
+uniform float2 bg_uv_scale;
+uniform float bg_opacity;
+uniform texture2d bg_tex;
+
+uniform float fg_mode;
+uniform float4 fg_color;
+uniform float4 fg_color2;
+uniform float2 fg_gradient;
+uniform float2 fg_uv_scale;
+uniform float fg_opacity;
+uniform texture2d fg_tex;
+
+sampler_state layerSampler {
+	Filter = Linear;
+	AddressU = Wrap;
+	AddressV = Wrap;
+};
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v_in)
+{
+	VertData vert_out;
+	vert_out.pos = mul(float4(v_in.pos.xyz, 1.0), ViewProj);
+	vert_out.uv = v_in.uv;
+	return vert_out;
+}
+
+/* Signed distance to a rounded rectangle centred on the origin. */
+float rounded_rect(float2 sample_pos, float2 half_size, float radius)
+{
+	float2 q = abs(sample_pos) - (half_size - radius);
+	return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;
+}
+
+float4 over(float4 top, float4 bottom)
+{
+	float alpha = top.a + bottom.a * (1.0 - top.a);
+	float3 rgb = (top.rgb * top.a + bottom.rgb * bottom.a * (1.0 - top.a)) / max(alpha, 0.0001);
+	return float4(rgb, alpha);
+}
+
+float4 PSBar(VertData v_in) : TARGET
+{
+	float2 uv = v_in.uv;
+
+	/* Coverage of the rounded rectangle, and of its interior. */
+	float2 half_size = bar_size * 0.5;
+	float2 sample_pos = uv * bar_size - half_size;
+	float radius = clamp(corner_radius, 0.0, min(half_size.x, half_size.y));
+
+	float dist = rounded_rect(sample_pos, half_size, radius);
+	float outer = clamp(0.5 - dist, 0.0, 1.0);
+	float inner = clamp(0.5 - (dist + border_width), 0.0, 1.0);
+
+	if (outer <= 0.0)
+		return float4(0.0, 0.0, 0.0, 0.0);
+
+	/* Position along the fill axis, and the length of that axis in pixels
+	 * so the mask edge can also be antialiased to one pixel. */
+	float along;
+	float span;
+
+	if (direction < 0.5) {
+		along = uv.x;
+		span = bar_size.x;
+	} else if (direction < 1.5) {
+		along = 1.0 - uv.x;
+		span = bar_size.x;
+	} else if (direction < 2.5) {
+		along = 1.0 - uv.y;
+		span = bar_size.y;
+	} else if (direction < 3.5) {
+		along = uv.y;
+		span = bar_size.y;
+	} else {
+		along = abs(uv.x - 0.5) * 2.0;
+		span = bar_size.x * 0.5;
+	}
+
+	float mask;
+	if (sweep_active > 0.5) {
+		float delta = abs(along - sweep_pos);
+		mask = clamp((sweep_half - delta) * span + 0.5, 0.0, 1.0);
+	} else {
+		mask = clamp((progress - along) * span + 0.5, 0.0, 1.0);
+	}
+
+	/* Background layer. */
+	float4 background;
+	if (bg_mode < 0.5) {
+		background = bg_color;
+	} else if (bg_mode < 1.5) {
+		float t = clamp(dot(uv - 0.5, bg_gradient) + 0.5, 0.0, 1.0);
+		background = lerp(bg_color, bg_color2, t);
+	} else {
+		background = bg_tex.Sample(layerSampler, uv * bg_uv_scale) * bg_color;
+	}
+
+	background.a *= bg_opacity;
+
+	/* Progress layer. */
+	float4 foreground;
+	if (fg_mode < 0.5) {
+		foreground = fg_color;
+	} else if (fg_mode < 1.5) {
+		float t = clamp(dot(uv - 0.5, fg_gradient) + 0.5, 0.0, 1.0);
+		foreground = lerp(fg_color, fg_color2, t);
+	} else {
+		foreground = fg_tex.Sample(layerSampler, uv * fg_uv_scale) * fg_color;
+	}
+
+	foreground.a *= fg_opacity * mask;
+
+	float4 fill = over(foreground, background);
+	fill.a *= inner;
+
+	float4 edge = border_color;
+	edge.a *= clamp(outer - inner, 0.0, 1.0);
+
+	return over(edge, fill);
+}
+
+technique Draw
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader = PSBar(v_in);
+	}
+}
