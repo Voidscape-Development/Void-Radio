@@ -44,16 +44,29 @@ target_sources(
     src/music/music-source.hpp
     src/music/playlist.cpp
     src/music/playlist.hpp
+    src/music/snapshot.hpp
     src/music/track-tags.cpp
     src/music/track-tags.hpp
     src/plugin-main.cpp
     src/sources/progress-bar-source.cpp
     src/sources/progress-bar-source.hpp
-    src/ui/now-playing-dock.cpp
-    src/ui/now-playing-dock.hpp
+    src/util/text-template.cpp
+    src/util/text-template.hpp
     src/util/vr-util.cpp
     src/util/vr-util.hpp
 )
+
+# The Now Playing dock needs both Qt and the frontend API. Without them the
+# plugin still builds; it just has no dock.
+if(ENABLE_QT AND ENABLE_FRONTEND_API)
+  target_sources(${CMAKE_PROJECT_NAME} PRIVATE src/ui/now-playing-dock.cpp src/ui/now-playing-dock.hpp)
+  target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE VOID_RADIO_ENABLE_DOCK)
+endif()
+
+if(OS_WINDOWS)
+  # Keep the windows.h min/max macros away from std::min and std::max.
+  target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE NOMINMAX)
+endif()
 
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 

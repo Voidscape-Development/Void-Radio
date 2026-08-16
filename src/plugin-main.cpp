@@ -22,7 +22,10 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include "filters/music-info-filter.hpp"
 #include "music/music-source.hpp"
 #include "sources/progress-bar-source.hpp"
+
+#ifdef VOID_RADIO_ENABLE_DOCK
 #include "ui/now-playing-dock.hpp"
+#endif
 
 OBS_DECLARE_MODULE()
 OBS_MODULE_USE_DEFAULT_LOCALE(PLUGIN_NAME, "en-US")
@@ -52,12 +55,16 @@ bool obs_module_load(void)
  * the dock is registered here rather than in obs_module_load. */
 void obs_module_post_load(void)
 {
+#ifdef VOID_RADIO_ENABLE_DOCK
 	vr::register_now_playing_dock();
+#endif
 }
 
 void obs_module_unload(void)
 {
+#ifdef VOID_RADIO_ENABLE_DOCK
 	vr::unregister_now_playing_dock();
+#endif
 
 	obs_log(LOG_INFO, "Void Radio unloaded");
 }

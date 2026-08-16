@@ -24,6 +24,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include <util/threading.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 
@@ -38,6 +39,10 @@ constexpr int MAX_TAG_LOADS_PER_TICK = 6;
 /* Audio buffered for a deck that is not currently driving the output. Two
  * seconds is far more than a crossfade needs and bounds the memory. */
 constexpr double RING_SECONDS = 2.0;
+
+/* Spelled out rather than taken from <cmath>, which does not define M_PI and
+ * friends on every toolchain. */
+constexpr double HALF_PI = 1.57079632679489661923;
 
 uint64_t ms_to_samples(int64_t ms, size_t rate)
 {
@@ -58,7 +63,7 @@ double curve(double t, bool equal_power, bool rising)
 		return t;
 
 	/* sin/cos pair keeps the summed power of a crossfade constant. */
-	return rising ? std::sin(t * M_PI_2) : 1.0 - std::cos(t * M_PI_2);
+	return rising ? std::sin(t * HALF_PI) : 1.0 - std::cos(t * HALF_PI);
 }
 
 } // namespace

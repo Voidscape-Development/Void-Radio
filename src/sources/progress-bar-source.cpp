@@ -33,6 +33,10 @@ namespace vr {
 
 namespace {
 
+/* Spelled out rather than taken from <cmath>, which does not define M_PI on
+ * every toolchain. */
+constexpr float PI = 3.14159265358979323846f;
+
 enum class FillType {
 	Color = 0,
 	Gradient = 1,
@@ -331,7 +335,7 @@ void set_layer_params(gs_effect_t *effect, const Layer &layer, const char *prefi
 		color = tint;
 	}
 
-	const float radians = layer.gradient_angle * (float)M_PI / 180.0f;
+	const float radians = layer.gradient_angle * PI / 180.0f;
 	struct vec2 gradient;
 	vec2_set(&gradient, std::cos(radians), std::sin(radians));
 
