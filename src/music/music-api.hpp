@@ -41,6 +41,7 @@ namespace vr {
 
 constexpr const char *MUSIC_SOURCE_ID = "void_radio_music_source";
 constexpr const char *PROGRESS_BAR_SOURCE_ID = "void_radio_progress_bar";
+constexpr const char *MUSIC_WIDGET_SOURCE_ID = "void_radio_music_widget";
 constexpr const char *MUSIC_INFO_FILTER_ID = "void_radio_music_info";
 
 struct EntryInfo {

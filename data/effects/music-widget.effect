@@ -1,0 +1,141 @@
+/*
+ * Void Radio music widget.
+ *
+ * Two techniques, both drawing a single quad:
+ *
+ *   Panel  - a rounded rectangle with an optional border, filled with a solid
+ *            colour, a linear gradient, or a texture. Used for the widget
+ *            backdrop, for album art, and for the soft shadow behind the art.
+ *   Sprite - a plain textured quad with wrapped sampling, used for text. The
+ *            wrap is what makes a marquee repeat: the texture holds one copy
+ *            of the text plus the gap, and the UV offset walks along it.
+ *
+ * As in the progress bar, coordinates are in the quad's own pixel space so
+ * antialiasing stays one pixel wide however the source is scaled in the scene.
+ */
+
+uniform float4x4 ViewProj;
+
+uniform float2 draw_size;
+uniform float corner_radius;
+uniform float border_width;
+uniform float4 border_color;
+
+/* Extra distance the edge is feathered over. Zero is a crisp shape; larger
+ * values turn the same rounded rectangle into a drop shadow. */
+uniform float softness;
+
+uniform float fill_mode; /* 0 colour, 1 gradient, 2 texture */
+uniform float4 fill_color;
+uniform float4 fill_color2;
+uniform float2 fill_gradient;
+uniform float2 uv_scale;
+uniform float2 uv_offset;
+uniform float opacity;
+
+uniform texture2d image;
+
+sampler_state clampSampler {
+	Filter = Linear;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+sampler_state wrapSampler {
+	Filter = Linear;
+	AddressU = Wrap;
+	AddressV = Clamp;
+};
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v_in)
+{
+	VertData vert_out;
+	vert_out.pos = mul(float4(v_in.pos.xyz, 1.0), ViewProj);
+	vert_out.uv = v_in.uv;
+	return vert_out;
+}
+
+/* Signed distance to a rounded rectangle centred on the origin. */
+float rounded_rect(float2 sample_pos, float2 half_size, float radius)
+{
+	float2 q = abs(sample_pos) - (half_size - radius);
+	return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;
+}
+
+float4 over(float4 top, float4 bottom)
+{
+	float alpha = top.a + bottom.a * (1.0 - top.a);
+	float3 rgb = (top.rgb * top.a + bottom.rgb * bottom.a * (1.0 - top.a)) / max(alpha, 0.0001);
+	return float4(rgb, alpha);
+}
+
+float4 fill_at(float2 uv, sampler_state samp)
+{
+	if (fill_mode < 0.5)
+		return fill_color;
+
+	if (fill_mode < 1.5) {
+		float t = clamp(dot(uv - 0.5, fill_gradient) + 0.5, 0.0, 1.0);
+		return lerp(fill_color, fill_color2, t);
+	}
+
+	return image.Sample(samp, uv * uv_scale + uv_offset) * fill_color;
+}
+
+float4 PSPanel(VertData v_in) : TARGET
+{
+	float2 uv = v_in.uv;
+
+	float2 half_size = draw_size * 0.5;
+	float2 sample_pos = uv * draw_size - half_size;
+	float radius = clamp(corner_radius, 0.0, min(half_size.x, half_size.y));
+
+	float dist = rounded_rect(sample_pos, half_size, radius);
+
+	/* One pixel of antialiasing, widened by `softness` for shadows. */
+	float feather = max(softness, 0.0) + 1.0;
+
+	float outer = clamp(0.5 - dist / feather, 0.0, 1.0);
+	if (outer <= 0.0)
+		return float4(0.0, 0.0, 0.0, 0.0);
+
+	float inner = clamp(0.5 - (dist + border_width) / feather, 0.0, 1.0);
+
+	float4 body = fill_at(uv, clampSampler);
+	body.a *= opacity * inner;
+
+	float4 edge = border_color;
+	edge.a *= opacity * clamp(outer - inner, 0.0, 1.0);
+
+	return over(edge, body);
+}
+
+float4 PSSprite(VertData v_in) : TARGET
+{
+	float4 color = image.Sample(wrapSampler, v_in.uv * uv_scale + uv_offset) * fill_color;
+	color.a *= opacity;
+	return color;
+}
+
+technique Panel
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader = PSPanel(v_in);
+	}
+}
+
+technique Sprite
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader = PSSprite(v_in);
+	}
+}
