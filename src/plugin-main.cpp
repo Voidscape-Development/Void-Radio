@@ -23,6 +23,10 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include "music/music-source.hpp"
 #include "sources/progress-bar-source.hpp"
 
+#ifdef VOID_RADIO_ENABLE_WIDGET
+#include "sources/music-widget-source.hpp"
+#endif
+
 #ifdef VOID_RADIO_ENABLE_DOCK
 #include "ui/now-playing-dock.hpp"
 #endif
@@ -45,6 +49,10 @@ bool obs_module_load(void)
 	vr::MusicSource::register_type();
 	vr::register_progress_bar_source();
 	vr::register_music_info_filter();
+
+#ifdef VOID_RADIO_ENABLE_WIDGET
+	vr::register_music_widget_source();
+#endif
 
 	obs_log(LOG_INFO, "Void Radio loaded (version %s)", PLUGIN_VERSION);
 

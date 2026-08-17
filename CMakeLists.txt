@@ -22,8 +22,8 @@ if(ENABLE_FRONTEND_API)
 endif()
 
 if(ENABLE_QT)
-  find_package(Qt6 COMPONENTS Widgets Core)
-  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE Qt6::Core Qt6::Widgets)
+  find_package(Qt6 COMPONENTS Widgets Core Gui)
+  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets)
   target_compile_options(
     ${CMAKE_PROJECT_NAME}
     PRIVATE $<$<C_COMPILER_ID:Clang,AppleClang>:-Wno-quoted-include-in-framework-header -Wno-comma>
@@ -39,6 +39,8 @@ target_sources(
   PRIVATE
     src/filters/music-info-filter.cpp
     src/filters/music-info-filter.hpp
+    src/music/album-art.cpp
+    src/music/album-art.hpp
     src/music/music-api.hpp
     src/music/music-source.cpp
     src/music/music-source.hpp
@@ -48,6 +50,8 @@ target_sources(
     src/music/track-tags.cpp
     src/music/track-tags.hpp
     src/plugin-main.cpp
+    src/render/bar-renderer.cpp
+    src/render/bar-renderer.hpp
     src/sources/progress-bar-source.cpp
     src/sources/progress-bar-source.hpp
     src/util/text-template.cpp
@@ -55,6 +59,23 @@ target_sources(
     src/util/vr-util.cpp
     src/util/vr-util.hpp
 )
+
+# The Music Widget draws its own glyphs and decodes its own cover art, neither
+# of which libobs can do, so it needs Qt. Without it the plugin still builds; it
+# just has no widget source.
+if(ENABLE_QT)
+  target_sources(
+    ${CMAKE_PROJECT_NAME}
+    PRIVATE
+      src/render/image-util.cpp
+      src/render/image-util.hpp
+      src/render/text-render.cpp
+      src/render/text-render.hpp
+      src/sources/music-widget-source.cpp
+      src/sources/music-widget-source.hpp
+  )
+  target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE VOID_RADIO_ENABLE_WIDGET)
+endif()
 
 # The Now Playing dock needs both Qt and the frontend API. Without them the
 # plugin still builds; it just has no dock.
