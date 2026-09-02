@@ -82,4 +82,51 @@ void remove_entry(obs_source_t *source, const std::string &path);
  * scene collection. The caller owns the references and must release them. */
 void enum_music_sources(std::vector<obs_source_t *> &out);
 
+/*
+ * One source's link to the music source it follows.
+ *
+ * The link is remembered by UUID as well as by name, so renaming the music
+ * source does not break it. Names still win when they resolve, because the
+ * name is what the property dropdown speaks in; the UUID is the fallback that
+ * catches a rename made since the scene collection was saved.
+ *
+ * Resolution is retried from the owner's tick for as long as it fails. That is
+ * what makes the link survive a scene collection that loads the widget before
+ * the music source it points at, and a music source deleted and made again.
+ */
+class MusicLink {
+public:
+	MusicLink() = default;
+	~MusicLink();
+
+	MusicLink(const MusicLink &) = delete;
+	MusicLink &operator=(const MusicLink &) = delete;
+
+	/* Reads "music_source" and "music_source_uuid" from `settings` and
+	 * binds. The resolved name and UUID are written back, so a rename is
+	 * picked up by the dropdown the next time properties are opened. */
+	void update(obs_data_t *settings);
+
+	/* Retries a binding that has not come good yet, and notices one whose
+	 * source has since been destroyed. Call once per tick. */
+	void tick(float seconds);
+
+	/* A strong reference to the linked source, or null. The caller owns the
+	 * reference and must release it. */
+	obs_source_t *get() const;
+
+	void release();
+
+	/* Adds the "Music Source" dropdown under the key this class reads. */
+	static void add_property(obs_properties_t *props);
+
+private:
+	bool resolve();
+
+	std::string name_;
+	std::string uuid_;
+	obs_weak_source_t *weak_ = nullptr;
+	float retry_ = 0.0f;
+};
+
 } // namespace vr

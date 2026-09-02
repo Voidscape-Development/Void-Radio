@@ -111,6 +111,11 @@ private:
 		std::atomic<bool> produced{false};
 		std::atomic<bool> drain_backlog{false};
 
+		/* Set once the deck reaching its end has been acted on, so that
+		 * a fade out running afterwards is not restarted on every poll
+		 * for as long as the finished deck is still around. */
+		std::atomic<bool> finish_handled{false};
+
 		std::mutex ring_mutex;
 		Ring rings[MAX_AUDIO_CHANNELS];
 		size_t ring_channels = 0;
@@ -187,6 +192,13 @@ private:
 	bool time_reset_ = true;
 	bool crossfade_active_ = false;
 	int consecutive_errors_ = 0;
+
+	/* A seek takes a moment to land, and a decoder in the middle of one can
+	 * report both a stale position and, briefly, a stopped state. Until the
+	 * deadline passes, the requested position is what the plugin believes
+	 * and the deck is not allowed to count as finished. */
+	int64_t seek_target_ms_ = 0;
+	uint64_t seek_settle_ns_ = 0;
 
 	int pending_entry_ = -1;
 	uint64_t pending_start_ns_ = 0;

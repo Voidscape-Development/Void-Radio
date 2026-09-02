@@ -129,6 +129,12 @@ struct RasterizedText {
 	 * outlines and shadows have room to spill without being cut off. */
 	int pad = 0;
 
+	/* Size of the whole raster, kept separately from `image` because the
+	 * caller is expected to free the pixel buffer once it has been uploaded
+	 * and the marquee still has to know how wide a scroll period is. */
+	uint32_t texture_width = 0;
+	uint32_t texture_height = 0;
+
 	/* Width of a single copy of the text, ignoring the marquee gap. */
 	uint32_t content_width = 0;
 	uint32_t content_height = 0;

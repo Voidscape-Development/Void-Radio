@@ -25,7 +25,6 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include <plugin-support.h>
 
 #include <string>
-#include <vector>
 
 namespace vr {
 
@@ -34,8 +33,7 @@ namespace {
 struct MusicInfoFilter {
 	obs_source_t *self = nullptr;
 
-	std::string music_source_name;
-	obs_weak_source_t *music_weak = nullptr;
+	MusicLink link;
 
 	std::string format;
 	std::string idle_format;
@@ -80,25 +78,7 @@ void filter_update(void *data, obs_data_t *settings)
 	filter->idle_format = obs_data_get_string(settings, "idle_format");
 	filter->time_format = (TimeFormat)obs_data_get_int(settings, "time_format");
 
-	const char *name = obs_data_get_string(settings, "music_source");
-
-	if (filter->music_source_name != name || !filter->music_weak) {
-		filter->music_source_name = name ? name : "";
-
-		if (filter->music_weak) {
-			obs_weak_source_release(filter->music_weak);
-			filter->music_weak = nullptr;
-		}
-
-		if (!filter->music_source_name.empty()) {
-			obs_source_t *source = obs_get_source_by_name(filter->music_source_name.c_str());
-			if (source) {
-				if (is_music_source(source))
-					filter->music_weak = obs_source_get_weak_source(source);
-				obs_source_release(source);
-			}
-		}
-	}
+	filter->link.update(settings);
 
 	/* Force the next tick to write even if the text is unchanged, so that
 	 * editing the template updates the target immediately. */
@@ -119,17 +99,18 @@ void filter_destroy(void *data)
 {
 	MusicInfoFilter *filter = static_cast<MusicInfoFilter *>(data);
 
-	if (filter->music_weak)
-		obs_weak_source_release(filter->music_weak);
+	filter->link.release();
 
 	delete filter;
 }
 
 void filter_tick(void *data, float seconds)
 {
-	UNUSED_PARAMETER(seconds);
-
 	MusicInfoFilter *filter = static_cast<MusicInfoFilter *>(data);
+
+	/* The link keeps looking for its music source, so a filter loaded
+	 * before the source it points at still finds it. */
+	filter->link.tick(seconds);
 
 	if (!obs_source_enabled(filter->self))
 		return;
@@ -137,12 +118,9 @@ void filter_tick(void *data, float seconds)
 	Snapshot snapshot;
 	bool have_snapshot = false;
 
-	if (filter->music_weak) {
-		obs_source_t *source = obs_weak_source_get_source(filter->music_weak);
-		if (source) {
-			have_snapshot = get_snapshot(source, snapshot);
-			obs_source_release(source);
-		}
+	if (obs_source_t *source = filter->link.get()) {
+		have_snapshot = get_snapshot(source, snapshot);
+		obs_source_release(source);
 	}
 
 	const bool idle = !have_snapshot || snapshot.state == PlayState::Stopped;
@@ -174,37 +152,13 @@ void filter_defaults(obs_data_t *settings)
 	obs_data_set_default_int(settings, "time_format", (int64_t)TimeFormat::Auto);
 }
 
-bool music_source_list(obs_properties_t *props, obs_property_t *property, obs_data_t *settings)
-{
-	UNUSED_PARAMETER(props);
-	UNUSED_PARAMETER(settings);
-
-	obs_property_list_clear(property);
-	obs_property_list_add_string(property, obs_module_text("Common.None"), "");
-
-	std::vector<obs_source_t *> sources;
-	enum_music_sources(sources);
-
-	for (obs_source_t *source : sources) {
-		const char *name = obs_source_get_name(source);
-		if (name)
-			obs_property_list_add_string(property, name, name);
-
-		obs_source_release(source);
-	}
-
-	return true;
-}
-
 obs_properties_t *filter_properties(void *data)
 {
 	UNUSED_PARAMETER(data);
 
 	obs_properties_t *props = obs_properties_create();
 
-	obs_property_t *music = obs_properties_add_list(props, "music_source", obs_module_text("Common.MusicSource"),
-							OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
-	music_source_list(props, music, nullptr);
+	MusicLink::add_property(props);
 
 	obs_properties_add_text(props, "format", obs_module_text("Info.Format"), OBS_TEXT_MULTILINE);
 	obs_properties_add_text(props, "idle_format", obs_module_text("Info.IdleFormat"), OBS_TEXT_MULTILINE);

@@ -347,13 +347,33 @@ void BarRenderer::update(obs_source_t *self, obs_data_t *settings, const std::st
 	reset_style_ = (ResetStyle)obs_data_get_int(settings, key("reset_style").c_str());
 	reset_seconds_ = (float)obs_data_get_int(settings, key("reset_ms").c_str()) / 1000.0f;
 	idle_mode_ = (IdleMode)obs_data_get_int(settings, key("idle_mode").c_str());
+	idle_trigger_ = (IdleTrigger)obs_data_get_int(settings, key("idle_trigger").c_str());
 
 	update_layer(self, background_, settings, prefix + "bg_");
 	update_layer(self, foreground_, settings, prefix + "fg_");
 }
 
+void BarRenderer::begin_reset(float to)
+{
+	if (reset_style_ == ResetStyle::Instant || reset_seconds_ <= 0.0f) {
+		animating_ = false;
+		displayed_ = to;
+		return;
+	}
+
+	animating_ = true;
+	animation_time_ = 0.0f;
+	animation_from_ = displayed_;
+}
+
 void BarRenderer::tick(float seconds, const Snapshot *snapshot)
 {
+	/* A track that has started but not yet said how long it is gets this
+	 * long before the bar gives up and calls itself idle. Long enough to
+	 * cover the handful of polls a decoder takes to report a duration,
+	 * short enough that a live stream settles into its idle look at once. */
+	constexpr float LENGTH_GRACE_SECONDS = 1.0f;
+
 	const uint64_t elapsed_ns = (uint64_t)(seconds * 1000000000.0f);
 
 	for (FillLayer *layer : {&background_, &foreground_}) {
@@ -368,44 +388,46 @@ void BarRenderer::tick(float seconds, const Snapshot *snapshot)
 		}
 	}
 
-	const bool playing = snapshot && snapshot->state != PlayState::Stopped;
-	idle_ = !playing || snapshot->duration_ms <= 0;
+	const bool stopped = !snapshot || snapshot->state == PlayState::Stopped ||
+			     (idle_trigger_ == IdleTrigger::StoppedOrPaused && snapshot->state == PlayState::Paused);
+	const bool have_length = !stopped && snapshot->duration_ms > 0;
 
-	if (idle_) {
+	/*
+	 * The track change is spotted from the serial alone, before anything
+	 * about lengths is decided. A freshly started track reports no duration
+	 * for a poll or two, and reading that gap as "gone idle" is what used
+	 * to reset the animation state and make the bar snap to the new track
+	 * instead of playing the chosen animation.
+	 */
+	if (!stopped) {
+		if (!have_serial_) {
+			have_serial_ = true;
+			last_serial_ = snapshot->track_serial;
+			animating_ = false;
+			displayed_ = have_length ? std::min(std::max(snapshot->progress, 0.0f), 1.0f) : 0.0f;
+		} else if (snapshot->track_serial != last_serial_) {
+			last_serial_ = snapshot->track_serial;
+			length_wait_ = 0.0f;
+			begin_reset(0.0f);
+		}
+	} else if (have_serial_) {
+		/* Playback ending runs the same animation, down to an empty bar,
+		 * rather than dropping it there in one frame. */
 		have_serial_ = false;
-		animating_ = false;
-		displayed_ = 0.0f;
-		target_ = 0.0f;
-
-		if (idle_mode_ == IdleMode::Sweep) {
-			sweep_position_ += seconds * 0.6f;
-			if (sweep_position_ > 1.35f)
-				sweep_position_ = -0.35f;
-		}
-
-		return;
+		begin_reset(0.0f);
 	}
 
-	target_ = std::min(std::max(snapshot->progress, 0.0f), 1.0f);
+	length_wait_ = have_length || stopped ? 0.0f : length_wait_ + seconds;
 
-	/* A new track restarts the bar. How it gets back to the start is the
-	 * user's choice; the animation always lands exactly on the live value
-	 * so there is no jump when it finishes. */
-	if (!have_serial_) {
-		have_serial_ = true;
-		last_serial_ = snapshot->track_serial;
-		displayed_ = target_;
-	} else if (snapshot->track_serial != last_serial_) {
-		last_serial_ = snapshot->track_serial;
+	idle_ = stopped || (!have_length && length_wait_ >= LENGTH_GRACE_SECONDS);
 
-		if (reset_style_ == ResetStyle::Instant || reset_seconds_ <= 0.0f) {
-			displayed_ = target_;
-		} else {
-			animating_ = true;
-			animation_time_ = 0.0f;
-			animation_from_ = displayed_;
-		}
+	if (idle_ && idle_mode_ == IdleMode::Sweep) {
+		sweep_position_ += seconds * 0.6f;
+		if (sweep_position_ > 1.35f)
+			sweep_position_ = -0.35f;
 	}
+
+	target_ = have_length ? std::min(std::max(snapshot->progress, 0.0f), 1.0f) : 0.0f;
 
 	if (!animating_) {
 		displayed_ = target_;
@@ -661,6 +683,15 @@ void BarRenderer::add_properties(obs_properties_t *props, const std::string &pre
 	obs_property_list_add_int(idle, obs_module_text("Bar.Idle.Hide"), (int64_t)IdleMode::Hide);
 	obs_property_list_add_int(idle, obs_module_text("Bar.Idle.Sweep"), (int64_t)IdleMode::Sweep);
 	obs_property_set_long_description(idle, obs_module_text("Bar.Idle.Description"));
+
+	obs_property_t *trigger = obs_properties_add_list(props, key("idle_trigger").c_str(),
+							  obs_module_text("Common.IdleTrigger"), OBS_COMBO_TYPE_LIST,
+							  OBS_COMBO_FORMAT_INT);
+	obs_property_list_add_int(trigger, obs_module_text("Common.IdleTrigger.Stopped"),
+				  (int64_t)IdleTrigger::Stopped);
+	obs_property_list_add_int(trigger, obs_module_text("Common.IdleTrigger.StoppedOrPaused"),
+				  (int64_t)IdleTrigger::StoppedOrPaused);
+	obs_property_set_long_description(trigger, obs_module_text("Common.IdleTrigger.Description"));
 }
 
 void BarRenderer::add_defaults(obs_data_t *settings, const std::string &prefix)
@@ -679,6 +710,7 @@ void BarRenderer::add_defaults(obs_data_t *settings, const std::string &prefix)
 	obs_data_set_default_int(settings, key("reset_style").c_str(), (int64_t)ResetStyle::FillThenReset);
 	obs_data_set_default_int(settings, key("reset_ms").c_str(), 300);
 	obs_data_set_default_int(settings, key("idle_mode").c_str(), (int64_t)IdleMode::Empty);
+	obs_data_set_default_int(settings, key("idle_trigger").c_str(), (int64_t)IdleTrigger::Stopped);
 
 	obs_data_set_default_int(settings, key("bg_type").c_str(), (int64_t)FillType::Color);
 	obs_data_set_default_int(settings, key("bg_color").c_str(), 0xC0000000);
