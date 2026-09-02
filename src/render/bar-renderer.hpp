@@ -65,6 +65,13 @@ enum class IdleMode {
 	Sweep = 2,
 };
 
+/* What counts as "nothing playing". A paused track is still the current track,
+ * so holding the bar where it was is the default. */
+enum class IdleTrigger {
+	Stopped = 0,
+	StoppedOrPaused = 1,
+};
+
 /* One drawable layer of the bar: the track behind the fill, or the fill. */
 struct FillLayer {
 	FillType type = FillType::Color;
@@ -149,6 +156,10 @@ public:
 	static void add_defaults(obs_data_t *settings, const std::string &prefix);
 
 private:
+	/* Starts the chosen "on track change" animation towards `to`, or lands
+	 * on it at once when there is no animation to run. */
+	void begin_reset(float to);
+
 	void update_layer(obs_source_t *self, FillLayer &layer, obs_data_t *settings, const std::string &prefix);
 	void resolve_layer_texture(FillLayer &layer, uint32_t width, uint32_t height);
 	void set_layer_params(const FillLayer &layer, const char *prefix, uint32_t width, uint32_t height,
@@ -171,6 +182,7 @@ private:
 	ResetStyle reset_style_ = ResetStyle::FillThenReset;
 	float reset_seconds_ = 0.3f;
 	IdleMode idle_mode_ = IdleMode::Empty;
+	IdleTrigger idle_trigger_ = IdleTrigger::Stopped;
 
 	uint32_t accent_ = 0;
 	bool accent_valid_ = false;
@@ -185,6 +197,11 @@ private:
 	float animation_from_ = 0.0f;
 	float sweep_position_ = 0.0f;
 	bool idle_ = true;
+
+	/* How long a track has been playing without reporting a length. A track
+	 * change goes through such a moment, and treating it as idle straight
+	 * away is what used to throw the animation away. */
+	float length_wait_ = 0.0f;
 };
 
 } // namespace vr

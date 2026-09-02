@@ -23,7 +23,6 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include <obs-module.h>
 
 #include <string>
-#include <vector>
 
 /*
  * The standalone bar is a thin shell around BarRenderer: it owns the link to a
@@ -40,8 +39,7 @@ struct ProgressBar {
 	obs_source_t *self = nullptr;
 	BarRenderer bar;
 
-	std::string music_source_name;
-	obs_weak_source_t *music_weak = nullptr;
+	MusicLink link;
 };
 
 const char *bar_get_name(void *type_data)
@@ -54,26 +52,7 @@ void bar_update(void *data, obs_data_t *settings)
 {
 	ProgressBar *bar = static_cast<ProgressBar *>(data);
 
-	const char *music_name = obs_data_get_string(settings, "music_source");
-
-	if (bar->music_source_name != music_name || !bar->music_weak) {
-		bar->music_source_name = music_name ? music_name : "";
-
-		if (bar->music_weak) {
-			obs_weak_source_release(bar->music_weak);
-			bar->music_weak = nullptr;
-		}
-
-		if (!bar->music_source_name.empty()) {
-			obs_source_t *source = obs_get_source_by_name(bar->music_source_name.c_str());
-			if (source) {
-				if (is_music_source(source))
-					bar->music_weak = obs_source_get_weak_source(source);
-				obs_source_release(source);
-			}
-		}
-	}
-
+	bar->link.update(settings);
 	bar->bar.update(bar->self, settings, std::string());
 }
 
@@ -93,9 +72,7 @@ void bar_destroy(void *data)
 	ProgressBar *bar = static_cast<ProgressBar *>(data);
 
 	bar->bar.destroy();
-
-	if (bar->music_weak)
-		obs_weak_source_release(bar->music_weak);
+	bar->link.release();
 
 	delete bar;
 }
@@ -114,15 +91,16 @@ void bar_tick(void *data, float seconds)
 {
 	ProgressBar *bar = static_cast<ProgressBar *>(data);
 
+	/* The link keeps looking for its music source, so a bar loaded before
+	 * the source it points at still finds it. */
+	bar->link.tick(seconds);
+
 	Snapshot snapshot;
 	bool have_snapshot = false;
 
-	if (bar->music_weak) {
-		obs_source_t *source = obs_weak_source_get_source(bar->music_weak);
-		if (source) {
-			have_snapshot = get_snapshot(source, snapshot);
-			obs_source_release(source);
-		}
+	if (obs_source_t *source = bar->link.get()) {
+		have_snapshot = get_snapshot(source, snapshot);
+		obs_source_release(source);
 	}
 
 	bar->bar.tick(seconds, have_snapshot ? &snapshot : nullptr);
@@ -152,37 +130,13 @@ void bar_defaults(obs_data_t *settings)
 	BarRenderer::add_defaults(settings, std::string());
 }
 
-bool music_source_list(obs_properties_t *props, obs_property_t *property, obs_data_t *settings)
-{
-	UNUSED_PARAMETER(props);
-	UNUSED_PARAMETER(settings);
-
-	obs_property_list_clear(property);
-	obs_property_list_add_string(property, obs_module_text("Common.None"), "");
-
-	std::vector<obs_source_t *> sources;
-	enum_music_sources(sources);
-
-	for (obs_source_t *source : sources) {
-		const char *name = obs_source_get_name(source);
-		if (name)
-			obs_property_list_add_string(property, name, name);
-
-		obs_source_release(source);
-	}
-
-	return true;
-}
-
 obs_properties_t *bar_properties(void *data)
 {
 	UNUSED_PARAMETER(data);
 
 	obs_properties_t *props = obs_properties_create();
 
-	obs_property_t *music = obs_properties_add_list(props, "music_source", obs_module_text("Common.MusicSource"),
-							OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
-	music_source_list(props, music, nullptr);
+	MusicLink::add_property(props);
 
 	/* No accent option here: the album colour is worked out by the Music
 	 * Widget, which is the only source that decodes cover art. */

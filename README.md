@@ -52,7 +52,9 @@ roughly where it was put. Every element has its own enable switch, layer order a
   filter uses, including the `[optional]` brackets. Each line has its own font, colour or
   gradient fill, outline, drop shadow, letter spacing, line height, alignment, letter case and
   rotation. A line whose template comes out empty draws nothing, so an untagged track leaves no
-  gap, and each line has a separate template for when playback has stopped.
+  gap, and each line has a separate template for when nothing is playing. That idle template is
+  the whole of what the line says while idle, so leaving it empty leaves the line blank rather
+  than carrying on with the last track's details.
 * **Progress bar**, the same one the standalone source draws, with all of its fill types,
   directions and animations.
 
@@ -66,7 +68,10 @@ each track.
 
 On a track change the card can cross-fade, slide across, fade out and back in, or swap
 instantly. When nothing is playing it can hide itself, show the placeholder image with the idle
-templates, or keep showing the last track.
+templates, or keep showing the last track — and pausing can be made to count as nothing playing
+too, which it does not by default, a paused track still being the current track. Keeping the
+last track on screen goes on using the playing templates for any line whose idle template is
+empty, since holding onto the last track is the point of it.
 
 A **Layout preset** dropdown and its Apply button write real values into all of the fields above
 — horizontal cards with art on either side, a vertical card, a wide banner, a compact bar, or
@@ -84,9 +89,11 @@ A video source that shows how far along the selected Music Source is.
 * Movement is interpolated between decoder updates, so the fill glides rather than stepping once
   per audio packet.
 * On a track change the bar animates: it fills to the end and sweeps back to the start
-  (configurable duration), eases back from wherever it was, or jumps instantly.
+  (configurable duration), eases back from wherever it was, or jumps instantly. Playback ending
+  runs the same animation, down to an empty bar.
 * Choose what it does when nothing is playing, or when the source is a live stream with no fixed
-  length: sit empty, hide, or run a looping sweep.
+  length: sit empty, hide, or run a looping sweep. Pausing can be made to count as nothing
+  playing as well, which it does not by default.
 
 ### Music Info
 

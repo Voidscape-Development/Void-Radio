@@ -106,6 +106,13 @@ enum class WidgetIdle {
 	Freeze = 2,
 };
 
+/* What counts as "nothing playing". A paused track is still the current track,
+ * so keeping the card as it was is the default. */
+enum class WidgetIdleTrigger {
+	Stopped = 0,
+	StoppedOrPaused = 1,
+};
+
 enum class LayoutPreset {
 	ArtLeft = 0,
 	ArtRight = 1,
@@ -398,8 +405,7 @@ struct MusicWidget {
 	uint32_t width = 640;
 	uint32_t height = 180;
 
-	std::string music_source_name;
-	obs_weak_source_t *music_weak = nullptr;
+	MusicLink link;
 
 	TimeFormat time_format = TimeFormat::Auto;
 
@@ -413,6 +419,7 @@ struct MusicWidget {
 	TrackTransition transition = TrackTransition::CrossFade;
 	float transition_seconds = 0.35f;
 	WidgetIdle idle_mode = WidgetIdle::Placeholder;
+	WidgetIdleTrigger idle_trigger = WidgetIdleTrigger::Stopped;
 
 	/* Playback state as of the last tick. */
 	Snapshot snapshot;
@@ -786,26 +793,9 @@ void widget_update(void *data, obs_data_t *settings)
 	widget->transition = (TrackTransition)obs_data_get_int(settings, "transition");
 	widget->transition_seconds = (float)obs_data_get_int(settings, "transition_ms") / 1000.0f;
 	widget->idle_mode = (WidgetIdle)obs_data_get_int(settings, "idle_mode");
+	widget->idle_trigger = (WidgetIdleTrigger)obs_data_get_int(settings, "idle_trigger");
 
-	const char *music_name = obs_data_get_string(settings, "music_source");
-
-	if (widget->music_source_name != music_name || !widget->music_weak) {
-		widget->music_source_name = music_name ? music_name : "";
-
-		if (widget->music_weak) {
-			obs_weak_source_release(widget->music_weak);
-			widget->music_weak = nullptr;
-		}
-
-		if (!widget->music_source_name.empty()) {
-			obs_source_t *source = obs_get_source_by_name(widget->music_source_name.c_str());
-			if (source) {
-				if (is_music_source(source))
-					widget->music_weak = obs_source_get_weak_source(source);
-				obs_source_release(source);
-			}
-		}
-	}
+	widget->link.update(settings);
 
 	/* Background. */
 	BackgroundElement &background = widget->background;
@@ -937,9 +927,7 @@ void widget_destroy(void *data)
 
 	widget->loader.stop();
 	widget->bar.destroy();
-
-	if (widget->music_weak)
-		obs_weak_source_release(widget->music_weak);
+	widget->link.release();
 
 	obs_enter_graphics();
 
@@ -975,12 +963,27 @@ void widget_destroy(void *data)
 /* Tick                                                                       */
 /* ------------------------------------------------------------------------- */
 
+/* Whether the widget should be showing its "nothing playing" behaviour, decided
+ * from the live playback state rather than from whatever the widget has chosen
+ * to keep on screen. */
+bool resolve_idle(const MusicWidget *widget)
+{
+	if (!widget->have_snapshot)
+		return true;
+
+	if (widget->snapshot.state == PlayState::Stopped)
+		return true;
+
+	return widget->idle_trigger == WidgetIdleTrigger::StoppedOrPaused &&
+	       widget->snapshot.state == PlayState::Paused;
+}
+
 /* The snapshot the templates and the bar should be looking at, which is not
- * the live one when playback has stopped and the widget is set to freeze. */
+ * the live one when nothing is playing and the widget is set to freeze. */
 const Snapshot *effective_snapshot(const MusicWidget *widget)
 {
-	if (widget->have_snapshot && widget->snapshot.state != PlayState::Stopped)
-		return &widget->snapshot;
+	if (!widget->idle)
+		return widget->have_snapshot ? &widget->snapshot : nullptr;
 
 	if (widget->idle_mode == WidgetIdle::Freeze && widget->have_frozen)
 		return &widget->frozen;
@@ -1000,13 +1003,24 @@ std::string expand_for(const MusicWidget *widget, const TextElement &element)
 	context.state_paused = obs_module_text("State.Paused");
 	context.state_stopped = obs_module_text("State.Stopped");
 
-	const bool stopped = !snapshot || snapshot->state == PlayState::Stopped;
-	const std::string &format = (stopped && !element.idle_format.empty()) ? element.idle_format : element.format;
+	/*
+	 * Idle draws the idle template and nothing else, so a line left blank
+	 * for this state really is blank rather than quietly carrying on with
+	 * the last track's title. Freezing is the exception: keeping the last
+	 * track on screen is the whole point of it, so there the playing
+	 * template still applies unless an idle one has been written.
+	 */
+	const std::string *format = &element.format;
 
-	if (format.empty())
+	if (widget->idle) {
+		if (widget->idle_mode != WidgetIdle::Freeze || !element.idle_format.empty())
+			format = &element.idle_format;
+	}
+
+	if (format->empty())
 		return std::string();
 
-	return expand_template(format, context);
+	return expand_template(*format, context);
 }
 
 void refresh_text(MusicWidget *widget, TextElement &element)
@@ -1100,15 +1114,15 @@ void widget_tick(void *data, float seconds)
 {
 	MusicWidget *widget = static_cast<MusicWidget *>(data);
 
-	/* Playback state. */
+	/* Playback state. The link keeps looking for its music source, so a
+	 * widget loaded before the source it points at still finds it. */
+	widget->link.tick(seconds);
+
 	widget->have_snapshot = false;
 
-	if (widget->music_weak) {
-		obs_source_t *source = obs_weak_source_get_source(widget->music_weak);
-		if (source) {
-			widget->have_snapshot = get_snapshot(source, widget->snapshot);
-			obs_source_release(source);
-		}
+	if (obs_source_t *source = widget->link.get()) {
+		widget->have_snapshot = get_snapshot(source, widget->snapshot);
+		obs_source_release(source);
 	}
 
 	if (widget->have_snapshot && widget->snapshot.state != PlayState::Stopped) {
@@ -1116,10 +1130,12 @@ void widget_tick(void *data, float seconds)
 		widget->have_frozen = true;
 	}
 
-	const Snapshot *snapshot = effective_snapshot(widget);
-	const bool playing = snapshot && snapshot->state != PlayState::Stopped;
+	/* Decided before anything reads it: what the widget shows while idle is
+	 * chosen from the live state, not from the snapshot it settles on. */
+	widget->idle = resolve_idle(widget);
 
-	widget->idle = !playing;
+	const Snapshot *snapshot = effective_snapshot(widget);
+	const bool playing = !widget->idle;
 
 	/* Track changes drive both the transition and a fresh art request. */
 	if (snapshot) {
@@ -1500,6 +1516,19 @@ void widget_render(void *data, gs_effect_t *unused)
 
 	gs_texrender_reset(widget->composite);
 
+	/*
+	 * draw_quad hands the shader colours and textures already converted to
+	 * linear whenever OBS is working that way, so the framebuffer has to be
+	 * told to encode back to sRGB on the way out. Without it every colour
+	 * lands darker and more saturated than it was picked - a pink panel
+	 * arriving on screen as red - and the card looks like it has a shadow
+	 * cast over it.
+	 */
+	const bool linear_srgb = gs_get_linear_srgb();
+	const bool previous_srgb = gs_framebuffer_srgb_enabled();
+
+	gs_enable_framebuffer_srgb(linear_srgb);
+
 	gs_blend_state_push();
 
 	/* Colour blends normally, but alpha accumulates rather than being
@@ -1508,6 +1537,10 @@ void widget_render(void *data, gs_effect_t *unused)
 	gs_blend_function_separate(GS_BLEND_SRCALPHA, GS_BLEND_INVSRCALPHA, GS_BLEND_ONE, GS_BLEND_INVSRCALPHA);
 
 	if (gs_texrender_begin(widget->composite, widget->width, widget->height)) {
+		/* Binding a render target clears the flag, so it is set again
+		 * for the composite pass and once more for the blit below. */
+		gs_enable_framebuffer_srgb(linear_srgb);
+
 		struct vec4 clear_color;
 		vec4_zero(&clear_color);
 
@@ -1520,10 +1553,13 @@ void widget_render(void *data, gs_effect_t *unused)
 	}
 
 	gs_blend_state_pop();
+	gs_enable_framebuffer_srgb(linear_srgb);
 
 	gs_texture_t *current = gs_texrender_get_texture(widget->composite);
-	if (!current)
+	if (!current) {
+		gs_enable_framebuffer_srgb(previous_srgb);
 		return;
+	}
 
 	ensure_previous_texture(widget);
 
@@ -1576,6 +1612,7 @@ void widget_render(void *data, gs_effect_t *unused)
 	}
 
 	gs_blend_state_pop();
+	gs_enable_framebuffer_srgb(previous_srgb);
 
 	/* Hold on to a clean frame so the next track change has something to
 	 * fade away from. */
@@ -1680,6 +1717,7 @@ void widget_defaults(obs_data_t *settings)
 	obs_data_set_default_int(settings, "transition", (int64_t)TrackTransition::CrossFade);
 	obs_data_set_default_int(settings, "transition_ms", 350);
 	obs_data_set_default_int(settings, "idle_mode", (int64_t)WidgetIdle::Placeholder);
+	obs_data_set_default_int(settings, "idle_trigger", (int64_t)WidgetIdleTrigger::Stopped);
 	obs_data_set_default_int(settings, "preset", (int64_t)LayoutPreset::ArtLeft);
 
 	obs_data_set_default_bool(settings, "bg_enable", true);
@@ -1871,25 +1909,6 @@ bool preset_clicked(obs_properties_t *props, obs_property_t *property, void *dat
 /* ------------------------------------------------------------------------- */
 /* Properties                                                                 */
 /* ------------------------------------------------------------------------- */
-
-void add_music_source_list(obs_properties_t *props)
-{
-	obs_property_t *music = obs_properties_add_list(props, "music_source", obs_module_text("Common.MusicSource"),
-							OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
-
-	obs_property_list_add_string(music, obs_module_text("Common.None"), "");
-
-	std::vector<obs_source_t *> sources;
-	enum_music_sources(sources);
-
-	for (obs_source_t *source : sources) {
-		const char *name = obs_source_get_name(source);
-		if (name)
-			obs_property_list_add_string(music, name, name);
-
-		obs_source_release(source);
-	}
-}
 
 void add_anchor_list(obs_properties_t *props, const std::string &prefix)
 {
@@ -2284,7 +2303,7 @@ obs_properties_t *widget_properties(void *data)
 {
 	obs_properties_t *props = obs_properties_create();
 
-	add_music_source_list(props);
+	MusicLink::add_property(props);
 
 	obs_properties_add_int(props, "width", obs_module_text("Widget.CanvasWidth"), 16, 8192, 1);
 	obs_properties_add_int(props, "height", obs_module_text("Widget.CanvasHeight"), 16, 8192, 1);
@@ -2333,6 +2352,15 @@ obs_properties_t *widget_properties(void *data)
 	obs_property_list_add_int(idle, obs_module_text("Widget.Idle.Placeholder"), (int64_t)WidgetIdle::Placeholder);
 	obs_property_list_add_int(idle, obs_module_text("Widget.Idle.Freeze"), (int64_t)WidgetIdle::Freeze);
 	obs_property_set_long_description(idle, obs_module_text("Widget.Idle.Description"));
+
+	obs_property_t *idle_trigger = obs_properties_add_list(props, "idle_trigger",
+							       obs_module_text("Common.IdleTrigger"),
+							       OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+	obs_property_list_add_int(idle_trigger, obs_module_text("Common.IdleTrigger.Stopped"),
+				  (int64_t)WidgetIdleTrigger::Stopped);
+	obs_property_list_add_int(idle_trigger, obs_module_text("Common.IdleTrigger.StoppedOrPaused"),
+				  (int64_t)WidgetIdleTrigger::StoppedOrPaused);
+	obs_property_set_long_description(idle_trigger, obs_module_text("Common.IdleTrigger.Description"));
 
 	add_background_properties(props);
 	add_art_properties(props);

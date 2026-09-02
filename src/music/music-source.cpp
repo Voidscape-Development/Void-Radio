@@ -36,6 +36,12 @@ constexpr uint64_t TICK_INTERVAL_MS = 20;
 constexpr size_t MAX_MIX_DECKS = 3;
 constexpr int MAX_TAG_LOADS_PER_TICK = 6;
 
+/* How long a seek is given to land before the decoder's own reports are
+ * trusted again, and how close a report has to be to the requested position to
+ * count as the seek having landed. */
+constexpr uint64_t SEEK_SETTLE_MS = 750;
+constexpr int64_t SEEK_LANDED_MS = 1500;
+
 /* Audio buffered for a deck that is not currently driving the output. Two
  * seconds is far more than a crossfade needs and bounds the memory. */
 constexpr double RING_SECONDS = 2.0;
@@ -644,8 +650,17 @@ void MusicSource::start_entry(int entry_index, int crossfade_ms)
 {
 	DeckPtr deck = create_deck(entry_index);
 	if (!deck) {
-		std::lock_guard<std::mutex> lock(state_mutex_);
-		consecutive_errors_++;
+		{
+			std::lock_guard<std::mutex> lock(state_mutex_);
+			consecutive_errors_++;
+		}
+
+		/* Nothing took over, so the deck that ended is allowed to ask
+		 * again on the next poll rather than leaving playback wedged on
+		 * a track that is already over. */
+		if (DeckPtr existing = current_deck())
+			existing->finish_handled.store(false);
+
 		return;
 	}
 
@@ -834,6 +849,7 @@ void MusicSource::note_track_change(int entry_index)
 	last_media_ns_ = os_gettime_ns();
 	duration_ms_ = 0;
 	time_reset_ = true;
+	seek_settle_ns_ = 0;
 	crossfade_active_ = false;
 	transport_ = PlayState::Playing;
 }
@@ -888,8 +904,27 @@ void MusicSource::play()
 
 	{
 		std::lock_guard<std::mutex> lock(state_mutex_);
+
+		/* Playing during a fade out cancels it, which means the gain it
+		 * was on its way to zero with has to be brought back up. */
+		const bool cancelled_fade_out = pending_stop_ns_ != 0;
+
 		pending_pause_ns_ = 0;
 		pending_stop_ns_ = 0;
+
+		if (deck && transport_ == PlayState::Playing) {
+			if (cancelled_fade_out) {
+				audio_t *obs_audio = obs_get_audio();
+				const size_t rate = obs_audio ? audio_output_get_sample_rate(obs_audio) : 48000;
+
+				if (fade_in_ms_ > 0)
+					deck->fade_to(1.0, ms_to_samples(fade_in_ms_, rate), false);
+				else
+					deck->set_gain(1.0);
+			}
+
+			return;
+		}
 
 		if (deck && transport_ == PlayState::Paused) {
 			transport_ = PlayState::Playing;
@@ -905,9 +940,6 @@ void MusicSource::play()
 			time_reset_ = true;
 			return;
 		}
-
-		if (deck && transport_ == PlayState::Playing)
-			return;
 	}
 
 	int target;
@@ -974,6 +1006,12 @@ void MusicSource::stop()
 		pending_pause_ns_ = 0;
 
 		if (deck && fade_out_ms > 0 && transport_ == PlayState::Playing) {
+			/* A fade out already under way is left to finish. Re-arming
+			 * it would push its deadline out by the whole fade every
+			 * time, and playback would never actually reach stopped. */
+			if (pending_stop_ns_)
+				return;
+
 			audio_t *obs_audio = obs_get_audio();
 			const size_t rate = obs_audio ? audio_output_get_sample_rate(obs_audio) : 48000;
 
@@ -987,6 +1025,7 @@ void MusicSource::stop()
 		last_media_ms_ = 0;
 		duration_ms_ = 0;
 		time_reset_ = true;
+		seek_settle_ns_ = 0;
 		consecutive_errors_ = 0;
 	}
 
@@ -1020,6 +1059,8 @@ void MusicSource::restart()
 		return;
 	}
 
+	deck->finish_handled.store(false);
+
 	obs_source_media_restart(deck->media);
 
 	std::lock_guard<std::mutex> lock(state_mutex_);
@@ -1027,20 +1068,38 @@ void MusicSource::restart()
 	last_media_ms_ = 0;
 	last_media_ns_ = os_gettime_ns();
 	time_reset_ = true;
+	seek_settle_ns_ = 0;
 }
 
+/*
+ * Seeking is asynchronous inside the media source: the decoder finishes the
+ * packet it is on, flushes, and only then reports the new position. During that
+ * window it can report the old position, and can pass through a stopped state
+ * on its way back to playing. Both have to be ignored here, or the poll below
+ * either drags the position back to where the seek started or mistakes the
+ * flush for the end of the track and skips to the next one.
+ */
 void MusicSource::seek(int64_t ms)
 {
 	DeckPtr deck = current_deck();
 	if (!deck)
 		return;
 
-	obs_source_media_set_time(deck->media, ms);
+	if (ms < 0)
+		ms = 0;
 
-	std::lock_guard<std::mutex> lock(state_mutex_);
-	last_media_ms_ = ms;
-	last_media_ns_ = os_gettime_ns();
-	time_reset_ = true;
+	{
+		std::lock_guard<std::mutex> lock(state_mutex_);
+		last_media_ms_ = ms;
+		last_media_ns_ = os_gettime_ns();
+		seek_target_ms_ = ms;
+		seek_settle_ns_ = last_media_ns_ + SEEK_SETTLE_MS * 1000000ULL;
+		time_reset_ = false;
+	}
+
+	deck->finish_handled.store(false);
+
+	obs_source_media_set_time(deck->media, ms);
 }
 
 void MusicSource::play_index(int index)
@@ -1241,26 +1300,60 @@ void MusicSource::poll_playback()
 	const int64_t time = obs_source_media_get_time(deck->media);
 	const uint64_t now = os_gettime_ns();
 
+	bool settling;
+
 	{
 		std::lock_guard<std::mutex> lock(state_mutex_);
 
 		duration_ms_ = duration > 0 ? duration : 0;
 
-		/* Media time only updates when a packet is decoded, and can jitter
-		 * backwards slightly. Interpolation in snapshot() smooths it out,
-		 * so only accept a value that moves forward or clearly seeks. */
-		const int64_t delta = time - last_media_ms_;
-		if (time_reset_ || delta >= 0 || delta < -1000) {
-			last_media_ms_ = time < 0 ? 0 : time;
-			last_media_ns_ = now;
-			time_reset_ = false;
+		settling = seek_settle_ns_ && now < seek_settle_ns_;
+
+		if (settling) {
+			/* Hold the requested position until the decoder reports
+			 * something near it, rather than letting the pre-seek
+			 * position drag the display back. */
+			const int64_t drift = time - seek_target_ms_;
+
+			if (drift <= SEEK_LANDED_MS && drift >= -SEEK_LANDED_MS) {
+				seek_settle_ns_ = 0;
+				settling = false;
+
+				last_media_ms_ = time < 0 ? 0 : time;
+				last_media_ns_ = now;
+			}
+		} else {
+			seek_settle_ns_ = 0;
+
+			/* Media time only updates when a packet is decoded, and can
+			 * jitter backwards slightly. Interpolation in snapshot()
+			 * smooths it out, so only accept a value that moves forward
+			 * or clearly seeks. */
+			const int64_t delta = time - last_media_ms_;
+			if (time_reset_ || delta >= 0 || delta < -1000) {
+				last_media_ms_ = time < 0 ? 0 : time;
+				last_media_ns_ = now;
+				time_reset_ = false;
+			}
 		}
 	}
+
+	/* A deck flushing a seek can report a stopped state on its way back to
+	 * playing, which must not be read as the track having ended. */
+	if (settling)
+		return;
 
 	/* A deck that never produced a sample counts as a failure; one that
 	 * played clears the counter. Without that, a playlist of unplayable
 	 * files would skip forever. */
 	if (state == OBS_MEDIA_STATE_ERROR || deck_finished(*deck)) {
+		/* Acting once matters: a fade out started here keeps the
+		 * finished deck around for as long as it runs, and re-running
+		 * this every 20 ms would push the fade's deadline out forever
+		 * and walk the playlist on as it went. */
+		if (deck->finish_handled.exchange(true))
+			return;
+
 		const bool produced = deck->produced.load();
 		bool give_up = false;
 
@@ -1926,6 +2019,153 @@ void enum_music_sources(std::vector<obs_source_t *> &out)
 	};
 
 	obs_enum_sources(collect, &out);
+}
+
+/* -------------------------------------------------------------------------- */
+/* MusicLink                                                                   */
+/* -------------------------------------------------------------------------- */
+
+namespace {
+
+/* A strong reference to `source` if it is a music source, null otherwise. The
+ * reference passed in is consumed either way. */
+obs_source_t *keep_if_music(obs_source_t *source)
+{
+	if (!source)
+		return nullptr;
+
+	if (is_music_source(source))
+		return source;
+
+	obs_source_release(source);
+	return nullptr;
+}
+
+/* How long an unresolved link waits before looking again. Frequent enough that
+ * a source appearing mid-session is picked up without the user noticing, rare
+ * enough that a link left on "None but saved" costs nothing. */
+constexpr float LINK_RETRY_SECONDS = 0.5f;
+
+} // namespace
+
+MusicLink::~MusicLink()
+{
+	release();
+}
+
+void MusicLink::release()
+{
+	if (!weak_)
+		return;
+
+	obs_weak_source_release(weak_);
+	weak_ = nullptr;
+}
+
+bool MusicLink::resolve()
+{
+	obs_source_t *source = nullptr;
+
+	if (!name_.empty())
+		source = keep_if_music(obs_get_source_by_name(name_.c_str()));
+
+	/* The UUID is only consulted when the name misses, which is exactly the
+	 * case where the source has been renamed behind the link's back. */
+	if (!source && !uuid_.empty())
+		source = keep_if_music(obs_get_source_by_uuid(uuid_.c_str()));
+
+	if (!source)
+		return false;
+
+	release();
+	weak_ = obs_source_get_weak_source(source);
+
+	if (const char *name = obs_source_get_name(source))
+		name_ = name;
+
+	if (const char *uuid = obs_source_get_uuid(source))
+		uuid_ = uuid;
+
+	obs_source_release(source);
+
+	return weak_ != nullptr;
+}
+
+void MusicLink::update(obs_data_t *settings)
+{
+	const char *name = obs_data_get_string(settings, "music_source");
+	const char *uuid = obs_data_get_string(settings, "music_source_uuid");
+
+	name_ = name ? name : "";
+	uuid_ = uuid ? uuid : "";
+	retry_ = 0.0f;
+
+	release();
+
+	/* An empty dropdown is the user saying "none", so a UUID left over from
+	 * an earlier selection must not quietly bring the old link back. */
+	if (name_.empty()) {
+		uuid_.clear();
+		obs_data_set_string(settings, "music_source_uuid", "");
+		return;
+	}
+
+	resolve();
+
+	obs_data_set_string(settings, "music_source", name_.c_str());
+	obs_data_set_string(settings, "music_source_uuid", uuid_.c_str());
+}
+
+void MusicLink::tick(float seconds)
+{
+	if (weak_) {
+		/* A weak reference outlives the source it points at, so a dead
+		 * one has to be noticed here or the link never recovers from
+		 * the source being deleted and made again. */
+		obs_source_t *source = obs_weak_source_get_source(weak_);
+
+		if (source) {
+			obs_source_release(source);
+			return;
+		}
+
+		release();
+	}
+
+	if (name_.empty() && uuid_.empty())
+		return;
+
+	retry_ += seconds;
+
+	if (retry_ < LINK_RETRY_SECONDS)
+		return;
+
+	retry_ = 0.0f;
+	resolve();
+}
+
+obs_source_t *MusicLink::get() const
+{
+	return weak_ ? obs_weak_source_get_source(weak_) : nullptr;
+}
+
+void MusicLink::add_property(obs_properties_t *props)
+{
+	obs_property_t *list = obs_properties_add_list(props, "music_source", obs_module_text("Common.MusicSource"),
+						       OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
+
+	obs_property_list_add_string(list, obs_module_text("Common.None"), "");
+
+	std::vector<obs_source_t *> sources;
+	enum_music_sources(sources);
+
+	for (obs_source_t *source : sources) {
+		const char *name = obs_source_get_name(source);
+		if (name)
+			obs_property_list_add_string(list, name, name);
+
+		obs_source_release(source);
+	}
 }
 
 } // namespace vr

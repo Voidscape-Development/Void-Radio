@@ -520,6 +520,8 @@ bool rasterize_text(const std::string &utf8, const TextStyle &style, uint32_t bo
 		return false;
 
 	out.pad = pad;
+	out.texture_width = (uint32_t)canvas_width;
+	out.texture_height = (uint32_t)canvas_height;
 	out.content_width = (uint32_t)std::lround(content_width);
 	out.content_height = (uint32_t)std::lround(content_height);
 	out.scrolls = scrolls;
@@ -529,7 +531,10 @@ bool rasterize_text(const std::string &utf8, const TextStyle &style, uint32_t bo
 
 float marquee_offset(const RasterizedText &text, const TextStyle &style, uint32_t box_width, float elapsed)
 {
-	if (!text.scrolls || !text.valid())
+	/* Deliberately not gated on the pixel buffer: it is freed as soon as
+	 * the texture has been uploaded, and the marquee runs for as long as
+	 * that texture is on screen. */
+	if (!text.scrolls || text.texture_width == 0)
 		return 0.0f;
 
 	const float speed = std::max(style.marquee_speed, 1.0f);
@@ -537,9 +542,7 @@ float marquee_offset(const RasterizedText &text, const TextStyle &style, uint32_
 	if (style.marquee_style == MarqueeStyle::Loop) {
 		/* The texture is exactly one period wide, so the offset simply
 		 * wraps around it. */
-		const float period = (float)text.image.width;
-		if (period <= 0.0f)
-			return 0.0f;
+		const float period = (float)text.texture_width;
 
 		return std::fmod(elapsed * speed, period);
 	}
