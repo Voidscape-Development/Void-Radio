@@ -77,6 +77,11 @@ jobs:
             'macos-universal;tar.xz|pkg'
             'ubuntu-24.04-x86_64;tar.xz|deb|ddeb'
             'sources;tar.xz'
+            # Separate release files for OBS Studio 33+
+            'windows-x64-obs33;zip'
+            'windows-x64-obs33-Portable;zip'
+            'macos-universal-obs33;tar.xz|pkg'
+            'ubuntu-26.04-x86_64-obs33;tar.xz|deb|ddeb'
           )
 
           for variant_data in "${variants[@]}"; do

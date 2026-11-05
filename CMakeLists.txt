@@ -16,6 +16,19 @@ add_library(${CMAKE_PROJECT_NAME} MODULE)
 find_package(libobs REQUIRED)
 target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE OBS::libobs)
 
+# A binary only loads in the OBS major line whose SDK it was built against
+# (OBS 33 removed the gs_image_file4 API), so make sure the SDK matches the
+# release files being produced.
+if(OBS_SDK_VARIANT STREQUAL "obs33" AND libobs_VERSION VERSION_LESS 33)
+  message(FATAL_ERROR "OBS_SDK_VARIANT=obs33 requires the OBS 33+ SDK, found libobs ${libobs_VERSION}")
+elseif(NOT OBS_SDK_VARIANT AND libobs_VERSION VERSION_GREATER_EQUAL 33)
+  message(
+    WARNING
+    "Building the default release against libobs ${libobs_VERSION}. "
+    "The result only loads in OBS Studio 33+; use an *-obs33 preset to label it as such."
+  )
+endif()
+
 if(ENABLE_FRONTEND_API)
   find_package(obs-frontend-api REQUIRED)
   target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE OBS::obs-frontend-api)
@@ -52,6 +65,7 @@ target_sources(
     src/plugin-main.cpp
     src/render/bar-renderer.cpp
     src/render/bar-renderer.hpp
+    src/render/image-file-compat.hpp
     src/sources/progress-bar-source.cpp
     src/sources/progress-bar-source.hpp
     src/util/text-template.cpp

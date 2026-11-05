@@ -44,6 +44,10 @@ inputs:
     description: Working directory for packaging
     required: false
     default: ${{ github.workspace }}
+  obsSdkVariant:
+    description: OBS SDK variant from buildspec.json sdkVariants (e.g. obs33); empty for the default SDK
+    required: false
+    default: ''
 runs:
   using: composite
   steps:
@@ -52,6 +56,7 @@ runs:
       shell: zsh --no-rcs --errexit --pipefail {0}
       working-directory: ${{ inputs.workingDirectory }}
       env:
+        OBS_SDK_VARIANT: ${{ inputs.obsSdkVariant }}
         CODESIGN_IDENT: ${{ inputs.codesignIdent }}
         CODESIGN_IDENT_INSTALLER: ${{ inputs.installerIdent }}
         CODESIGN_TEAM: ${{ inputs.codesignTeam }}
@@ -84,6 +89,8 @@ runs:
       if: runner.os == 'Linux'
       shell: zsh --no-rcs --errexit --pipefail {0}
       working-directory: ${{ inputs.workingDirectory }}
+      env:
+        OBS_SDK_VARIANT: ${{ inputs.obsSdkVariant }}
       run: |
         : Run Ubuntu Packaging
         package_args=(
@@ -99,6 +106,8 @@ runs:
     - name: Run Windows Packaging
       if: runner.os == 'Windows'
       shell: pwsh
+      env:
+        OBS_SDK_VARIANT: ${{ inputs.obsSdkVariant }}
       run: |
         # Run Windows Packaging
         if ( $Env:RUNNER_DEBUG -ne $null ) {

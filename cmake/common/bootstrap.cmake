@@ -58,6 +58,19 @@ set(PLUGIN_EMAIL ${_email})
 set(PLUGIN_VERSION ${_version})
 set(MACOS_BUNDLEID ${_bundleId})
 
+# Empty builds against the default OBS SDK in buildspec.json "dependencies".
+# A name from "sdkVariants" (e.g. obs33) builds against that SDK instead.
+set(OBS_SDK_VARIANT "" CACHE STRING "OBS SDK variant from buildspec.json sdkVariants (empty for the default SDK)")
+
+if(OBS_SDK_VARIANT)
+  string(JSON _variant_data ERROR_VARIABLE _variant_error GET ${buildspec} sdkVariants ${OBS_SDK_VARIANT})
+  if(_variant_error)
+    message(FATAL_ERROR "OBS_SDK_VARIANT '${OBS_SDK_VARIANT}' is not defined in buildspec.json sdkVariants")
+  endif()
+  unset(_variant_data)
+  unset(_variant_error)
+endif()
+
 string(REPLACE "." ";" _version_canonical "${_version}")
 list(GET _version_canonical 0 PLUGIN_VERSION_MAJOR)
 list(GET _version_canonical 1 PLUGIN_VERSION_MINOR)

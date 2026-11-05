@@ -47,7 +47,15 @@ function Build {
     Push-Location -Stack BuildTemp
     Ensure-Location $ProjectRoot
 
-    $CmakeArgs = @('--preset', "windows-ci-${Target}")
+    # OBS_SDK_VARIANT (e.g. obs33) builds against an alternate OBS SDK from
+    # buildspec.json "sdkVariants", using its own preset, build tree and
+    # install prefix so it never mixes with the default build.
+    $Variant = $env:OBS_SDK_VARIANT
+    $PresetSuffix = if ( $Variant ) { "-${Variant}" } else { '' }
+    $BuildDir = if ( $Variant ) { "build_${Target}_${Variant}" } else { "build_${Target}" }
+    $ReleaseDir = if ( $Variant ) { "${ProjectRoot}/release/${Variant}" } else { "${ProjectRoot}/release" }
+
+    $CmakeArgs = @('--preset', "windows-ci-${Target}${PresetSuffix}")
     $CmakeBuildArgs = @('--build')
     $CmakeInstallArgs = @()
 
@@ -58,15 +66,15 @@ function Build {
     }
 
     $CmakeBuildArgs += @(
-        '--preset', "windows-${Target}"
+        '--preset', "windows-${Target}${PresetSuffix}"
         '--config', $Configuration
         '--parallel'
         '--', '/consoleLoggerParameters:Summary', '/noLogo'
     )
 
     $CmakeInstallArgs += @(
-        '--install', "build_${Target}"
-        '--prefix', "${ProjectRoot}/release/${Configuration}"
+        '--install', $BuildDir
+        '--prefix', "${ReleaseDir}/${Configuration}"
         '--config', $Configuration
     )
 

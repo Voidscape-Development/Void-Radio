@@ -97,15 +97,18 @@ package() {
   read -r product_name product_version <<< \
     "$(jq -r '. | {name, version} | join(" ")' ${buildspec_file})"
 
-  local output_name="${product_name}-${product_version}-${host_os}-universal"
+  local variant=${OBS_SDK_VARIANT:-}
+  local output_name="${product_name}-${product_version}-${host_os}-universal${variant:+-${variant}}"
+  # Staging directory used by build-macos for this SDK variant
+  local stage_dir="${project_root}/release${variant:+/${variant}}/${config}"
 
-  if [[ ! -d ${project_root}/release/${config}/${product_name}.plugin ]] {
+  if [[ ! -d ${stage_dir}/${product_name}.plugin ]] {
     log_error 'No release artifact found. Run the build script or the CMake install procedure first.'
     return 2
   }
 
   if (( package )) {
-    if [[ ! -f ${project_root}/release/${config}/${product_name}.pkg ]] {
+    if [[ ! -f ${stage_dir}/${product_name}.pkg ]] {
       log_error 'Installer Package not found. Run the build script or the CMake build and install procedures first.'
       return 2
     }
@@ -120,12 +123,12 @@ package() {
     if (( codesign )) {
       productsign \
         --sign "${CODESIGN_IDENT_INSTALLER}" \
-        ${project_root}/release/${config}/${product_name}.pkg \
+        ${stage_dir}/${product_name}.pkg \
         ${project_root}/release/${output_name}.pkg
 
-      rm ${project_root}/release/${config}/${product_name}.pkg
+      rm ${stage_dir}/${product_name}.pkg
     } else {
-      mv ${project_root}/release/${config}/${product_name}.pkg \
+      mv ${stage_dir}/${product_name}.pkg \
         ${project_root}/release/${output_name}.pkg
     }
 
@@ -155,14 +158,14 @@ package() {
     popd
   } else {
     log_group "Archiving ${product_name}..."
-    pushd ${project_root}/release/${config}
+    pushd ${stage_dir}
     XZ_OPT=-T0 tar -cvJf ${project_root}/release/${output_name}.tar.xz ${product_name}.plugin
     popd
   }
 
   if [[ ${config} == Release ]] {
     log_group "Archiving ${product_name} Debug Symbols..."
-    pushd ${project_root}/release/${config}
+    pushd ${stage_dir}
     XZ_OPT=-T0 tar -cvJf ${project_root}/release/${output_name}-dSYMs.tar.xz ${product_name}.plugin.dSYM
     popd
   }
