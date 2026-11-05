@@ -131,20 +131,21 @@ macro(_fetch_obs_studio_git)
   string(REPLACE "VERSION" "${version}" destination "${destination}")
   set(_obs_source_dir "${dependencies_dir}/${destination}")
 
-  find_package(Git REQUIRED)
-
+  # The verified commit is recorded next to the other dependency stamps, and
+  # the clone's .git directory is dropped afterwards: the sources are only used
+  # to build libobs, and git's read-only pack files break the recursive xattr
+  # pass the macOS dependency setup runs over the dependencies directory.
+  set(_obs_stamp "${dependencies_dir}/.dependency_obs-studio_${arch}.commit")
   set(_obs_head "")
-  if(EXISTS "${_obs_source_dir}/.git")
-    execute_process(
-      COMMAND "${GIT_EXECUTABLE}" rev-parse HEAD
-      WORKING_DIRECTORY "${_obs_source_dir}"
-      OUTPUT_VARIABLE _obs_head
-      OUTPUT_STRIP_TRAILING_WHITESPACE
-      ERROR_QUIET
-    )
+  if(EXISTS "${_obs_stamp}" AND EXISTS "${_obs_source_dir}/CMakeLists.txt")
+    file(READ "${_obs_stamp}" _obs_head)
+    string(STRIP "${_obs_head}" _obs_head)
   endif()
 
   if(NOT _obs_head STREQUAL commit)
+    find_package(Git REQUIRED)
+
+    file(REMOVE "${_obs_stamp}")
     file(REMOVE_RECURSE "${_obs_source_dir}")
     message(STATUS "Cloning ${repository} (${version})")
     execute_process(
@@ -164,6 +165,9 @@ macro(_fetch_obs_studio_git)
       file(REMOVE_RECURSE "${_obs_source_dir}")
       message(FATAL_ERROR "${label} tag ${version} resolved to ${_obs_head}, expected ${commit}")
     endif()
+
+    file(REMOVE_RECURSE "${_obs_source_dir}/.git")
+    file(WRITE "${_obs_stamp}" "${commit}")
   endif()
 
   set(_obs_version ${version})
