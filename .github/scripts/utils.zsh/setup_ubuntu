@@ -37,9 +37,19 @@ if (( ! (${skips[(Ie)all]} + ${skips[(Ie)deps]}) )) {
 
   sudo add-apt-repository --yes ppa:obsproject/obs-studio
 
-  # Always take obs-studio from the OBS PPA. Ubuntu 26.04 runners prefer
-  # amd64v3 builds, and the PPA only publishes amd64, so without this apt picks
-  # the distro's older obs-studio, which also lacks the libobs CMake package.
+  # Ubuntu 26.04 runners use the amd64v3 architecture variant. The OBS PPA
+  # publishes an empty binary-amd64v3 index next to its binary-amd64 one, and
+  # apt lets the variant index replace the base one, so it never sees the PPA's
+  # obs-studio and falls back to the distro's older build, which also lacks the
+  # libobs CMake package. Read only the amd64 index from the PPA, and always take
+  # obs-studio from it. Neither changes anything on runners without amd64v3.
+  local ppa_source
+  for ppa_source (/etc/apt/sources.list.d/obsproject-ubuntu-obs-studio-*.sources(N)) {
+    if ! grep -q '^Architectures-Remove:' ${ppa_source}; then
+      print -r -- 'Architectures-Remove: amd64v3' | sudo tee -a ${ppa_source} > /dev/null
+    fi
+  }
+
   print -r -- $'Package: obs-studio\nPin: release o=LP-PPA-obsproject-obs-studio\nPin-Priority: 1001' \
     | sudo tee /etc/apt/preferences.d/obs-studio-ppa > /dev/null
 
