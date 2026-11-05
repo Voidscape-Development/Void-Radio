@@ -113,10 +113,10 @@
       "name": "macos-ci-obs33",
       "inherits": ["macos-obs33"],
       "displayName": "macOS Universal CI build (OBS 33+)",
-      "description": "Build for OBS Studio 33+ on macOS 13.0+ (Universal binary) for CI",
+      "description": "Build for OBS Studio 33+ on macOS 13.0+ (Universal binary) for CI. Uses Xcode's own compiler: Xcode 26 does not recognize the ccache launcher.",
       "cacheVariables": {
         "CMAKE_COMPILE_WARNING_AS_ERROR": true,
-        "ENABLE_CCACHE": true
+        "ENABLE_CCACHE": false
       }
     },
     {
