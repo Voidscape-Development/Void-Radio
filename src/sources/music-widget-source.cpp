@@ -20,6 +20,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include "music/album-art.hpp"
 #include "music/music-api.hpp"
 #include "render/bar-renderer.hpp"
+#include "render/image-file-compat.hpp"
 #include "render/image-util.hpp"
 #include "render/text-render.hpp"
 #include "util/text-template.hpp"
@@ -214,7 +215,7 @@ struct BackgroundElement {
 	int z = -100;
 
 	/* Only used by the image fill; the blurred art comes from the loader. */
-	gs_image_file4_t image = {};
+	vr_image_file_t image = {};
 	bool image_valid = false;
 };
 
@@ -759,7 +760,7 @@ void load_background_image(BackgroundElement &background, const char *path)
 
 	if (background.image_valid) {
 		obs_enter_graphics();
-		gs_image_file4_free(&background.image);
+		vr_image_file_free(&background.image);
 		obs_leave_graphics();
 		background.image_valid = false;
 	}
@@ -769,13 +770,13 @@ void load_background_image(BackgroundElement &background, const char *path)
 	if (background.image_path.empty())
 		return;
 
-	gs_image_file4_init(&background.image, background.image_path.c_str(), GS_IMAGE_ALPHA_STRAIGHT);
+	vr_image_file_init(&background.image, background.image_path.c_str(), GS_IMAGE_ALPHA_STRAIGHT);
 
 	obs_enter_graphics();
-	gs_image_file4_init_texture(&background.image);
+	vr_image_file_init_texture(&background.image);
 	obs_leave_graphics();
 
-	background.image_valid = background.image.image3.image2.image.loaded;
+	background.image_valid = vr_image_file_base(background.image).loaded;
 
 	if (!background.image_valid)
 		obs_log(LOG_WARNING, "music widget could not load background image '%s'",
@@ -946,7 +947,7 @@ void widget_destroy(void *data)
 		gs_texture_destroy(widget->previous);
 
 	if (widget->background.image_valid)
-		gs_image_file4_free(&widget->background.image);
+		vr_image_file_free(&widget->background.image);
 
 	if (widget->composite)
 		gs_texrender_destroy(widget->composite);
@@ -1255,7 +1256,7 @@ void draw_background(MusicWidget *widget)
 	case BackgroundType::Image:
 		if (background.image_valid) {
 			params.fill_mode = 2;
-			params.texture = background.image.image3.image2.image.texture;
+			params.texture = vr_image_file_base(background.image).texture;
 			params.color = 0xFFFFFFFF;
 		}
 		break;

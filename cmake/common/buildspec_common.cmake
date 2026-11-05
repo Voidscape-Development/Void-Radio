@@ -62,12 +62,19 @@ function(_setup_obs_studio)
     set(_cmake_extra "-DCMAKE_OSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}")
   endif()
 
+  # OBS Studio 33 renamed ENABLE_PLUGINS to ENABLE_CORE_MODULES.
+  if(_obs_version VERSION_GREATER_EQUAL 33)
+    set(_obs_disable_modules -DENABLE_CORE_MODULES:BOOL=OFF)
+  else()
+    set(_obs_disable_modules -DENABLE_PLUGINS:BOOL=OFF)
+  endif()
+
   message(STATUS "Configure ${label} (${arch})")
   execute_process(
     COMMAND
       "${CMAKE_COMMAND}" -S "${dependencies_dir}/${_obs_destination}" -B
       "${dependencies_dir}/${_obs_destination}/build_${arch}" -G ${_cmake_generator} "${_cmake_arch}"
-      -DOBS_CMAKE_VERSION:STRING=3.0.0 -DENABLE_PLUGINS:BOOL=OFF -DENABLE_FRONTEND:BOOL=OFF
+      -DOBS_CMAKE_VERSION:STRING=3.0.0 ${_obs_disable_modules} -DENABLE_FRONTEND:BOOL=OFF
       -DOBS_VERSION_OVERRIDE:STRING=${_obs_version} "-DCMAKE_PREFIX_PATH='${CMAKE_PREFIX_PATH}'" ${_is_fresh}
       ${_cmake_extra}
     RESULT_VARIABLE _process_result
@@ -116,18 +123,89 @@ function(_setup_obs_studio)
   message(STATUS "Install ${label} (${arch}) - done")
 endfunction()
 
+# _fetch_obs_studio_git: Shallow-clone OBS sources at a tag and verify the commit
+macro(_fetch_obs_studio_git)
+  message(STATUS "Setting up ${label} (${arch})")
+
+  set(destination "${obs-studio_destination}")
+  string(REPLACE "VERSION" "${version}" destination "${destination}")
+  set(_obs_source_dir "${dependencies_dir}/${destination}")
+
+  # The verified commit is recorded next to the other dependency stamps, and
+  # the clone's .git directory is dropped afterwards: the sources are only used
+  # to build libobs, and git's read-only pack files break the recursive xattr
+  # pass the macOS dependency setup runs over the dependencies directory.
+  set(_obs_stamp "${dependencies_dir}/.dependency_obs-studio_${arch}.commit")
+  set(_obs_head "")
+  if(EXISTS "${_obs_stamp}" AND EXISTS "${_obs_source_dir}/CMakeLists.txt")
+    file(READ "${_obs_stamp}" _obs_head)
+    string(STRIP "${_obs_head}" _obs_head)
+  endif()
+
+  if(NOT _obs_head STREQUAL commit)
+    find_package(Git REQUIRED)
+
+    file(REMOVE "${_obs_stamp}")
+    file(REMOVE_RECURSE "${_obs_source_dir}")
+    message(STATUS "Cloning ${repository} (${version})")
+    execute_process(
+      COMMAND
+        "${GIT_EXECUTABLE}" -c advice.detachedHead=false clone --quiet --depth 1 --branch "${version}" "${repository}"
+        "${_obs_source_dir}"
+      COMMAND_ERROR_IS_FATAL ANY
+    )
+    execute_process(
+      COMMAND "${GIT_EXECUTABLE}" rev-parse HEAD
+      WORKING_DIRECTORY "${_obs_source_dir}"
+      OUTPUT_VARIABLE _obs_head
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      COMMAND_ERROR_IS_FATAL ANY
+    )
+    if(NOT _obs_head STREQUAL commit)
+      file(REMOVE_RECURSE "${_obs_source_dir}")
+      message(FATAL_ERROR "${label} tag ${version} resolved to ${_obs_head}, expected ${commit}")
+    endif()
+
+    file(REMOVE_RECURSE "${_obs_source_dir}/.git")
+    file(WRITE "${_obs_stamp}" "${commit}")
+  endif()
+
+  set(_obs_version ${version})
+  set(_obs_destination "${destination}")
+  list(APPEND CMAKE_PREFIX_PATH "${dependencies_dir}")
+
+  message(STATUS "Setting up ${label} (${arch}) - done")
+endmacro()
+
 # _check_dependencies: Fetch and extract pre-built OBS build dependencies
 function(_check_dependencies)
   file(READ "${CMAKE_CURRENT_SOURCE_DIR}/buildspec.json" buildspec)
 
-  string(JSON dependency_data GET ${buildspec} dependencies)
+  # The default dependency set targets the original OBS Studio SDK. Setting
+  # OBS_SDK_VARIANT (e.g. "obs33") selects an alternate set from
+  # "sdkVariants" in buildspec.json, which is used for the separate OBS 33+
+  # release files.
+  if(OBS_SDK_VARIANT)
+    string(JSON dependency_data GET ${buildspec} sdkVariants ${OBS_SDK_VARIANT} dependencies)
+  else()
+    string(JSON dependency_data GET ${buildspec} dependencies)
+  endif()
 
   foreach(dependency IN LISTS dependencies_list)
     string(JSON data GET ${dependency_data} ${dependency})
     string(JSON version GET ${data} version)
+    string(JSON label GET ${data} label)
+
+    # OBS sources can be pinned to a git commit instead of an archive hash.
+    string(JSON commit ERROR_VARIABLE error GET ${data} commit)
+    if(dependency STREQUAL obs-studio AND commit)
+      string(JSON repository GET ${data} repository)
+      _fetch_obs_studio_git()
+      continue()
+    endif()
+
     string(JSON hash GET ${data} hashes ${platform})
     string(JSON url GET ${data} baseUrl)
-    string(JSON label GET ${data} label)
     string(JSON revision ERROR_VARIABLE error GET ${data} revision ${platform})
 
     message(STATUS "Setting up ${label} (${arch})")

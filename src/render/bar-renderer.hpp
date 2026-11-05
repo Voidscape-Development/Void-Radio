@@ -19,9 +19,9 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #pragma once
 
 #include "music/snapshot.hpp"
+#include "render/image-file-compat.hpp"
 
 #include <obs-module.h>
-#include <graphics/image-file.h>
 
 #include <cstdint>
 #include <string>
@@ -86,7 +86,7 @@ struct FillLayer {
 	bool follow_accent = false;
 
 	std::string image_path;
-	gs_image_file4_t image = {};
+	vr_image_file_t image = {};
 	bool image_valid = false;
 
 	std::string source_name;

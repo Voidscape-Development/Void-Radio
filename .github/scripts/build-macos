@@ -93,6 +93,13 @@ build() {
   read -r product_name product_version <<< \
     "$(jq -r '. | {name, version} | join(" ")' ${buildspec_file})"
 
+  # OBS_SDK_VARIANT (e.g. obs33) builds against an alternate OBS SDK from
+  # buildspec.json "sdkVariants", using its own preset, build tree and
+  # install prefix so it never mixes with the default build.
+  local variant=${OBS_SDK_VARIANT:-}
+  local build_dir="build_macos${variant:+_${variant}}"
+  local release_dir="${project_root}/release${variant:+/${variant}}"
+
   pushd ${project_root}
 
   local -a cmake_args=()
@@ -101,7 +108,7 @@ build() {
 
   if (( debug )) cmake_args+=(--debug-output)
 
-  cmake_args+=(--preset 'macos-ci')
+  cmake_args+=(--preset "macos-ci${variant:+-${variant}}")
 
   typeset -gx NSUnbufferedIO=YES
 
@@ -139,12 +146,12 @@ build() {
     build
   )
 
-  pushd build_macos
+  pushd ${build_dir}
   run_xcodebuild ${build_args}
   popd
 
   log_group "Installing ${product_name}..."
-  cmake --install build_macos --config ${config} --prefix "${project_root}/release/${config}"
+  cmake --install ${build_dir} --config ${config} --prefix "${release_dir}/${config}"
 
   popd
   log_group

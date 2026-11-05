@@ -22,12 +22,22 @@ function(set_target_properties_plugin target)
 
   set_target_properties(${target} PROPERTIES VERSION 0 SOVERSION ${PLUGIN_VERSION})
 
-  install(TARGETS ${target} RUNTIME DESTINATION "${target}/bin/64bit" LIBRARY DESTINATION "${target}/bin/64bit")
+  # OBS Studio 33+ loads third-party plugins from <plugin>/<plugin>.dll with
+  # resources in <plugin>/data. The bin/64bit subfolder is flagged as Legacy
+  # there, so builds against the OBS 33+ SDK use the flat layout. Builds against
+  # the original SDK keep the layout older OBS versions expect.
+  if(OBS_SDK_VARIANT)
+    set(_binary_destination "${target}")
+  else()
+    set(_binary_destination "${target}/bin/64bit")
+  endif()
+
+  install(TARGETS ${target} RUNTIME DESTINATION "${_binary_destination}" LIBRARY DESTINATION "${_binary_destination}")
 
   install(
     FILES "$<TARGET_PDB_FILE:${target}>"
     CONFIGURATIONS RelWithDebInfo Debug Release
-    DESTINATION "${target}/bin/64bit"
+    DESTINATION "${_binary_destination}"
     OPTIONAL
   )
 

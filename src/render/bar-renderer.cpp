@@ -52,7 +52,7 @@ void free_layer_graphics(FillLayer &layer)
 	obs_enter_graphics();
 
 	if (layer.image_valid) {
-		gs_image_file4_free(&layer.image);
+		vr_image_file_free(&layer.image);
 		layer.image_valid = false;
 	}
 
@@ -73,7 +73,7 @@ void load_layer_image(FillLayer &layer, const char *path)
 
 	if (layer.image_valid) {
 		obs_enter_graphics();
-		gs_image_file4_free(&layer.image);
+		vr_image_file_free(&layer.image);
 		obs_leave_graphics();
 		layer.image_valid = false;
 	}
@@ -83,13 +83,13 @@ void load_layer_image(FillLayer &layer, const char *path)
 	if (layer.image_path.empty())
 		return;
 
-	gs_image_file4_init(&layer.image, layer.image_path.c_str(), GS_IMAGE_ALPHA_STRAIGHT);
+	vr_image_file_init(&layer.image, layer.image_path.c_str(), GS_IMAGE_ALPHA_STRAIGHT);
 
 	obs_enter_graphics();
-	gs_image_file4_init_texture(&layer.image);
+	vr_image_file_init_texture(&layer.image);
 	obs_leave_graphics();
 
-	layer.image_valid = layer.image.image3.image2.image.loaded;
+	layer.image_valid = vr_image_file_base(layer.image).loaded;
 
 	if (!layer.image_valid)
 		obs_log(LOG_WARNING, "progress bar could not load image '%s'", layer.image_path.c_str());
@@ -381,9 +381,9 @@ void BarRenderer::tick(float seconds, const Snapshot *snapshot)
 			continue;
 
 		/* Animated images only advance when their texture is refreshed. */
-		if (gs_image_file4_tick(&layer->image, elapsed_ns)) {
+		if (vr_image_file_tick(&layer->image, elapsed_ns)) {
 			obs_enter_graphics();
-			gs_image_file4_update_texture(&layer->image);
+			vr_image_file_update_texture(&layer->image);
 			obs_leave_graphics();
 		}
 	}
@@ -467,9 +467,9 @@ void BarRenderer::resolve_layer_texture(FillLayer &layer, uint32_t width, uint32
 	layer.texture_cy = 0;
 
 	if (layer.type == FillType::Image && layer.image_valid) {
-		layer.texture = layer.image.image3.image2.image.texture;
-		layer.texture_cx = layer.image.image3.image2.image.cx;
-		layer.texture_cy = layer.image.image3.image2.image.cy;
+		layer.texture = vr_image_file_base(layer.image).texture;
+		layer.texture_cx = vr_image_file_base(layer.image).cx;
+		layer.texture_cy = vr_image_file_base(layer.image).cy;
 	} else if (layer.type == FillType::Source) {
 		render_layer_source(layer);
 	}

@@ -49,6 +49,11 @@ function Package {
 
     $OutputName = "${ProductName}-${ProductVersion}-windows-${Target}"
 
+    if ( $env:OBS_SDK_VARIANT ) {
+        Package-Variant
+        return
+    }
+
     $RemoveArgs = @{
         ErrorAction = 'SilentlyContinue'
         Path = @(
@@ -95,6 +100,62 @@ function Package {
     if ( Test-Path -Path "${InstallRoot}/data" ) {
         Copy-Item -Path "${InstallRoot}/data/*" -Destination $PortableDataDir -Recurse -Force
     }
+
+    $CompressArgs = @{
+        Path = (Get-ChildItem -Path $PortableRoot)
+        CompressionLevel = 'Optimal'
+        DestinationPath = "${ProjectRoot}/release-portable/${OutputName}-Portable.zip"
+        Verbose = ($Env:CI -ne $null)
+    }
+    Compress-Archive -Force @CompressArgs
+    Log-Group
+}
+
+# Package-Variant: Archive a build made against an alternate OBS SDK (e.g.
+# obs33). OBS Studio 33+ loads third-party plugins from
+#   %ProgramData%\obs-studio\plugins\<plugin>\<plugin>.dll  (+ data\)
+# and portable installs from <OBS root>\plugins\<plugin>\, so both archives
+# use that layout. They are separate files next to the default archives.
+function Package-Variant {
+    $Variant = $env:OBS_SDK_VARIANT
+    $OutputName = "${ProductName}-${ProductVersion}-windows-${Target}-${Variant}"
+    $StageRoot = "${ProjectRoot}/release/${Variant}/${Configuration}"
+    $PluginRoot = "${StageRoot}/${ProductName}"
+    $PortableRoot = "${ProjectRoot}/release-portable/${Variant}/${Configuration}"
+
+    $RemoveArgs = @{
+        ErrorAction = 'SilentlyContinue'
+        Path = @(
+            "${ProjectRoot}/release/${OutputName}.zip"
+            "${ProjectRoot}/release-portable/${OutputName}-Portable.zip"
+        )
+    }
+
+    Remove-Item @RemoveArgs
+
+    if ( ! ( Test-Path -Path "${PluginRoot}/${ProductName}.dll" ) ) {
+        throw "No packaged binary found at ${PluginRoot}/${ProductName}.dll"
+    }
+
+    Log-Group "Archiving ${ProductName} (${Variant})..."
+    $CompressArgs = @{
+        Path = $PluginRoot
+        CompressionLevel = 'Optimal'
+        DestinationPath = "${ProjectRoot}/release/${OutputName}.zip"
+        Verbose = ($Env:CI -ne $null)
+    }
+    Compress-Archive -Force @CompressArgs
+    Log-Group
+
+    Log-Group "Archiving portable ${ProductName} (${Variant})..."
+
+    if ( Test-Path -Path $PortableRoot ) {
+        Remove-Item -Path $PortableRoot -Recurse -Force
+    }
+
+    $PortablePluginsDir = "${PortableRoot}/plugins"
+    New-Item -ItemType Directory -Force -Path $PortablePluginsDir | Out-Null
+    Copy-Item -Path $PluginRoot -Destination $PortablePluginsDir -Recurse -Force
 
     $CompressArgs = @{
         Path = (Get-ChildItem -Path $PortableRoot)
