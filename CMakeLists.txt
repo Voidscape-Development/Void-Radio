@@ -117,7 +117,11 @@ if(ENABLE_QT)
       src/sources/music-widget-source.hpp
       src/sources/music-widget/art-loader.cpp
       src/sources/music-widget/art-loader.hpp
+      src/sources/music-widget/widget-design.cpp
+      src/sources/music-widget/widget-design.hpp
       src/sources/music-widget/widget-draw.cpp
+      src/sources/music-widget/widget-layout.cpp
+      src/sources/music-widget/widget-layout.hpp
       src/sources/music-widget/widget-properties.cpp
       src/sources/music-widget/widget-render.cpp
       src/sources/music-widget/widget-settings.cpp

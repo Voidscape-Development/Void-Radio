@@ -112,15 +112,6 @@ enum class WidgetIdleTrigger {
 	StoppedOrPaused = 1,
 };
 
-enum class LayoutPreset {
-	ArtLeft = 0,
-	ArtRight = 1,
-	VerticalCard = 2,
-	WideBanner = 3,
-	CompactBar = 4,
-	TextOnly = 5,
-};
-
 /* ------------------------------------------------------------------------- */
 /* Element state                                                              */
 /* ------------------------------------------------------------------------- */
@@ -301,8 +292,12 @@ struct MusicWidget {
 	gs_texture_t *art_texture = nullptr;
 	gs_texture_t *blur_texture = nullptr;
 
+	/* Taken from the cover art, unless the colour source is a fixed colour,
+	 * which then stands in for it everywhere. */
 	uint32_t accent = 0;
 	bool accent_valid = false;
+	bool fixed_accent = false;
+	uint32_t fixed_color = 0;
 
 	gs_texrender_t *composite = nullptr;
 	gs_texture_t *previous = nullptr;
@@ -319,10 +314,9 @@ void draw_quad(gs_effect_t *effect, const DrawParams &params, bool sprite);
 void destroy_texture(gs_texture_t *&texture);
 gs_texture_t *create_texture(const RgbaImage &image);
 uint32_t resolve_color(const MusicWidget *widget, uint32_t color, bool follow_accent);
+bool current_accent(const MusicWidget *widget, uint32_t &color);
 void widget_update(void *data, obs_data_t *settings);
 void widget_defaults(obs_data_t *settings);
-void apply_preset(obs_data_t *settings, LayoutPreset preset);
-bool preset_clicked(obs_properties_t *props, obs_property_t *property, void *data);
 obs_properties_t *widget_properties(void *data);
 void widget_render(void *data, gs_effect_t *unused);
 void widget_enum_active_sources(void *data, obs_source_enum_proc_t callback, void *param);

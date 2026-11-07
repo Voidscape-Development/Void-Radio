@@ -18,6 +18,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 
 /* Reading the widget's settings, its defaults, and the layout presets. */
 
+#include "sources/music-widget/widget-design.hpp"
 #include "sources/music-widget/widget.hpp"
 
 #include <plugin-support.h>
@@ -128,9 +129,19 @@ static void load_background_image(BackgroundElement &background, const char *pat
 			background.image_path.c_str());
 }
 
-void widget_update(void *data, obs_data_t *settings)
+void widget_update(void *data, obs_data_t *raw_settings)
 {
 	MusicWidget *widget = static_cast<MusicWidget *>(data);
+
+	/* The music source binding writes back into the real settings. */
+	widget->link.update(raw_settings);
+
+	/* Everything else reads the settings with the layout and style worked
+	 * into each element, exactly as if those values had been set by hand. */
+	obs_data_t *settings = resolve_settings(raw_settings);
+
+	widget->fixed_accent = (ColorSource)obs_data_get_int(settings, "color_source") == ColorSource::Fixed;
+	widget->fixed_color = (uint32_t)obs_data_get_int(settings, "fixed_color");
 
 	widget->width = (uint32_t)std::max<int64_t>(1, obs_data_get_int(settings, "width"));
 	widget->height = (uint32_t)std::max<int64_t>(1, obs_data_get_int(settings, "height"));
@@ -140,8 +151,6 @@ void widget_update(void *data, obs_data_t *settings)
 	widget->transition_seconds = (float)obs_data_get_int(settings, "transition_ms") / 1000.0f;
 	widget->idle_mode = (WidgetIdle)obs_data_get_int(settings, "idle_mode");
 	widget->idle_trigger = (WidgetIdleTrigger)obs_data_get_int(settings, "idle_trigger");
-
-	widget->link.update(settings);
 
 	/* Background. */
 	BackgroundElement &background = widget->background;
@@ -220,6 +229,8 @@ void widget_update(void *data, obs_data_t *settings)
 	/* The backdrop blur depends on the canvas size and on its own
 	 * settings, so any of them changing means asking for it again. */
 	widget->art_settings_dirty = true;
+
+	obs_data_release(settings);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -261,8 +272,9 @@ static void set_text_defaults(obs_data_t *settings, int slot)
 	 * an artist is what a fresh widget should look like. */
 	const bool enabled = slot < 2;
 
-	obs_data_set_default_string(settings, key_for(prefix, "format").c_str(),
-				    slot == 0 ? "{title}" : (slot == 1 ? "{artist}" : ""));
+	static const char *const FORMATS[TEXT_SLOTS] = {
+		"{title}", "{artist}", "{album}[ · {year}]", "{elapsed} / {duration}", "", ""};
+	obs_data_set_default_string(settings, key_for(prefix, "format").c_str(), FORMATS[slot]);
 	obs_data_set_default_string(settings, key_for(prefix, "idle_format").c_str(), slot == 0 ? "{state}" : "");
 	obs_data_set_default_bool(settings, key_for(prefix, "hide_empty").c_str(), true);
 	obs_data_set_default_bool(settings, key_for(prefix, "accent").c_str(), false);
@@ -312,7 +324,6 @@ void widget_defaults(obs_data_t *settings)
 	obs_data_set_default_int(settings, "transition_ms", 350);
 	obs_data_set_default_int(settings, "idle_mode", (int64_t)WidgetIdle::Placeholder);
 	obs_data_set_default_int(settings, "idle_trigger", (int64_t)WidgetIdleTrigger::Stopped);
-	obs_data_set_default_int(settings, "preset", (int64_t)LayoutPreset::ArtLeft);
 
 	obs_data_set_default_bool(settings, "bg_enable", true);
 	obs_data_set_default_int(settings, "bg_type", (int64_t)BackgroundType::Color);
@@ -358,146 +369,8 @@ void widget_defaults(obs_data_t *settings)
 
 	obs_data_set_default_double(settings, "bar_corner_radius", 5.0);
 	obs_data_set_default_int(settings, "bar_bg_color", 0x60FFFFFF);
-}
 
-/* ------------------------------------------------------------------------- */
-/* Presets                                                                    */
-/* ------------------------------------------------------------------------- */
-
-static void write_geometry(obs_data_t *settings, const std::string &prefix, bool enabled, Anchor anchor, double x,
-			   double y, int64_t width, int64_t height)
-{
-	obs_data_set_bool(settings, key_for(prefix, "enable").c_str(), enabled);
-	obs_data_set_int(settings, key_for(prefix, "anchor").c_str(), (int64_t)anchor);
-	obs_data_set_double(settings, key_for(prefix, "x").c_str(), x);
-	obs_data_set_double(settings, key_for(prefix, "y").c_str(), y);
-	obs_data_set_int(settings, key_for(prefix, "width").c_str(), width);
-	obs_data_set_int(settings, key_for(prefix, "height").c_str(), height);
-}
-
-static void write_font(obs_data_t *settings, const std::string &prefix, int64_t size, bool bold)
-{
-	obs_data_t *font = obs_data_get_obj(settings, key_for(prefix, "font").c_str());
-
-	if (!font)
-		font = obs_data_create();
-
-	const char *face = obs_data_get_string(font, "face");
-	if (!face || !*face)
-		obs_data_set_string(font, "face", "Arial");
-
-	obs_data_set_int(font, "size", size);
-	obs_data_set_int(font, "flags", bold ? OBS_FONT_BOLD : 0);
-	obs_data_set_string(font, "style", bold ? "Bold" : "Regular");
-
-	obs_data_set_obj(settings, key_for(prefix, "font").c_str(), font);
-
-	obs_data_release(font);
-}
-
-/*
- * Presets write real values into the same fields the user edits, so applying
- * one is a starting point and never a mode: everything stays adjustable
- * afterwards.
- */
-void apply_preset(obs_data_t *settings, LayoutPreset preset)
-{
-	/* Slots past the two a preset uses are switched off rather than left
-	 * showing whatever the last layout put there. */
-	for (int slot = 2; slot < TEXT_SLOTS; slot++)
-		obs_data_set_bool(settings, key_for(text_prefix(slot), "enable").c_str(), false);
-
-	switch (preset) {
-	case LayoutPreset::ArtRight:
-		obs_data_set_int(settings, "width", 640);
-		obs_data_set_int(settings, "height", 180);
-		write_geometry(settings, "art_", true, Anchor::MiddleRight, -16.0, 0.0, 148, 148);
-		write_geometry(settings, text_prefix(0), true, Anchor::TopLeft, 24.0, 34.0, 410, 40);
-		write_geometry(settings, text_prefix(1), true, Anchor::TopLeft, 24.0, 76.0, 410, 32);
-		write_geometry(settings, "bar_", true, Anchor::BottomLeft, 24.0, -26.0, 410, 10);
-		write_font(settings, text_prefix(0), 30, true);
-		write_font(settings, text_prefix(1), 22, false);
-		break;
-
-	case LayoutPreset::VerticalCard:
-		obs_data_set_int(settings, "width", 400);
-		obs_data_set_int(settings, "height", 480);
-		write_geometry(settings, "art_", true, Anchor::TopCenter, 0.0, 24.0, 320, 320);
-		write_geometry(settings, text_prefix(0), true, Anchor::TopCenter, 0.0, 360.0, 352, 44);
-		write_geometry(settings, text_prefix(1), true, Anchor::TopCenter, 0.0, 404.0, 352, 32);
-		write_geometry(settings, "bar_", true, Anchor::BottomCenter, 0.0, -22.0, 352, 8);
-		write_font(settings, text_prefix(0), 32, true);
-		write_font(settings, text_prefix(1), 22, false);
-		obs_data_set_int(settings, key_for(text_prefix(0), "align").c_str(), (int64_t)TextAlign::Center);
-		obs_data_set_int(settings, key_for(text_prefix(1), "align").c_str(), (int64_t)TextAlign::Center);
-		break;
-
-	case LayoutPreset::WideBanner:
-		obs_data_set_int(settings, "width", 800);
-		obs_data_set_int(settings, "height", 120);
-		write_geometry(settings, "art_", true, Anchor::MiddleLeft, 12.0, 0.0, 96, 96);
-		write_geometry(settings, text_prefix(0), true, Anchor::TopLeft, 124.0, 22.0, 660, 36);
-		write_geometry(settings, text_prefix(1), true, Anchor::TopLeft, 124.0, 58.0, 660, 28);
-		write_geometry(settings, "bar_", true, Anchor::BottomLeft, 124.0, -18.0, 660, 6);
-		write_font(settings, text_prefix(0), 26, true);
-		write_font(settings, text_prefix(1), 20, false);
-		break;
-
-	case LayoutPreset::CompactBar:
-		obs_data_set_int(settings, "width", 420);
-		obs_data_set_int(settings, "height", 64);
-		write_geometry(settings, "art_", true, Anchor::MiddleLeft, 8.0, 0.0, 48, 48);
-		write_geometry(settings, text_prefix(0), true, Anchor::TopLeft, 66.0, 10.0, 344, 24);
-		write_geometry(settings, text_prefix(1), true, Anchor::TopLeft, 66.0, 32.0, 344, 18);
-		write_geometry(settings, "bar_", true, Anchor::BottomLeft, 66.0, -8.0, 344, 4);
-		write_font(settings, text_prefix(0), 18, true);
-		write_font(settings, text_prefix(1), 14, false);
-		break;
-
-	case LayoutPreset::TextOnly:
-		obs_data_set_int(settings, "width", 560);
-		obs_data_set_int(settings, "height", 110);
-		write_geometry(settings, "art_", false, Anchor::MiddleLeft, 16.0, 0.0, 148, 148);
-		write_geometry(settings, text_prefix(0), true, Anchor::TopLeft, 20.0, 16.0, 520, 40);
-		write_geometry(settings, text_prefix(1), true, Anchor::TopLeft, 20.0, 56.0, 520, 30);
-		write_geometry(settings, "bar_", true, Anchor::BottomLeft, 20.0, -18.0, 520, 8);
-		write_font(settings, text_prefix(0), 30, true);
-		write_font(settings, text_prefix(1), 22, false);
-		break;
-
-	default:
-		obs_data_set_int(settings, "width", 640);
-		obs_data_set_int(settings, "height", 180);
-		write_geometry(settings, "art_", true, Anchor::MiddleLeft, 16.0, 0.0, 148, 148);
-		write_geometry(settings, text_prefix(0), true, Anchor::TopLeft, 200.0, 34.0, 410, 40);
-		write_geometry(settings, text_prefix(1), true, Anchor::TopLeft, 200.0, 76.0, 410, 32);
-		write_geometry(settings, "bar_", true, Anchor::BottomLeft, 200.0, -26.0, 410, 10);
-		write_font(settings, text_prefix(0), 30, true);
-		write_font(settings, text_prefix(1), 22, false);
-		break;
-	}
-}
-
-bool preset_clicked(obs_properties_t *props, obs_property_t *property, void *data)
-{
-	UNUSED_PARAMETER(props);
-	UNUSED_PARAMETER(property);
-
-	MusicWidget *widget = static_cast<MusicWidget *>(data);
-	if (!widget || !widget->self)
-		return false;
-
-	obs_data_t *settings = obs_source_get_settings(widget->self);
-	if (!settings)
-		return false;
-
-	apply_preset(settings, (LayoutPreset)obs_data_get_int(settings, "preset"));
-
-	obs_source_update(widget->self, settings);
-	obs_data_release(settings);
-
-	/* Redraws the whole panel so the new values show up in the fields. */
-	return true;
+	add_design_defaults(settings);
 }
 
 } // namespace vr::widget

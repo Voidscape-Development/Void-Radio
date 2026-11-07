@@ -17,6 +17,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 */
 
 #include "sources/music-widget-source.hpp"
+#include "sources/music-widget/widget-design.hpp"
 #include "sources/music-widget/widget.hpp"
 
 #include <plugin-support.h>
@@ -68,6 +69,7 @@ static void *widget_create(obs_data_t *settings, obs_source_t *source)
 	widget->bar.create();
 	widget->loader.start();
 
+	migrate_settings(settings);
 	widget_update(widget, settings);
 
 	return widget;
@@ -335,7 +337,9 @@ static void widget_tick(void *data, float seconds)
 		widget->upload_blur = false;
 	}
 
-	widget->bar.set_accent(widget->accent, widget->accent_valid);
+	uint32_t accent = 0;
+	const bool have_accent = current_accent(widget, accent);
+	widget->bar.set_accent(accent, have_accent);
 	widget->bar.tick(seconds, snapshot);
 
 	/* Art animation. */

@@ -28,6 +28,7 @@ add_library(
   "${VOID_RADIO_SRC}/music/album-art.cpp"
   "${VOID_RADIO_SRC}/music/gain-envelope.cpp"
   "${VOID_RADIO_SRC}/music/player.cpp"
+  "${VOID_RADIO_SRC}/sources/music-widget/widget-layout.cpp"
   "${VOID_RADIO_SRC}/music/playlist.cpp"
   "${VOID_RADIO_SRC}/music/track-tags.cpp"
   "${VOID_RADIO_SRC}/util/text-template.cpp"
@@ -44,7 +45,7 @@ target_link_libraries(media-fixtures PUBLIC PkgConfig::FFMPEG)
 foreach(
   test_name
   IN
-  ITEMS tag playlist template player decoder
+  ITEMS tag playlist template player decoder widget-layout
 )
   add_executable(${test_name}-tests "${test_name}-tests.cpp")
   target_link_libraries(${test_name}-tests PRIVATE void-radio-testable media-fixtures)

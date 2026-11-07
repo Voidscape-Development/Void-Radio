@@ -16,17 +16,131 @@ You should have received a copy of the GNU General Public License along
 with this program. If not, see <https://www.gnu.org/licenses/>
 */
 
-/* The widget's properties dialog. */
+/* The widget's properties dialog.
+ *
+ * The main view asks three things - how the widget is laid out, how it looks,
+ * and what its lines say - and everything else waits behind "Show advanced
+ * options". Groups that the chosen layout or style already decide are hidden,
+ * so nothing on screen is a setting that does nothing. */
 
+#include "sources/music-widget/widget-design.hpp"
 #include "sources/music-widget/widget.hpp"
+
+#ifdef VOID_RADIO_ENABLE_EDITOR
+#include "ui/widget-editor.hpp"
+#endif
 
 namespace vr::widget {
 
-/* ------------------------------------------------------------------------- */
-/* Properties                                                                 */
-/* ------------------------------------------------------------------------- */
+namespace {
 
-static void add_anchor_list(obs_properties_t *props, const std::string &prefix)
+const char *const LINE_NAMES[TEXT_SLOTS] = {"Widget.Line1", "Widget.Line2", "Widget.Line3",
+					    "Widget.Line4", "Widget.Line5", "Widget.Line6"};
+const char *const LINE_DETAILS[TEXT_SLOTS] = {"Widget.Line1.Details", "Widget.Line2.Details", "Widget.Line3.Details",
+					      "Widget.Line4.Details", "Widget.Line5.Details", "Widget.Line6.Details"};
+const char *const LINE_STYLE[TEXT_SLOTS] = {"Widget.Line1.Style", "Widget.Line2.Style", "Widget.Line3.Style",
+					    "Widget.Line4.Style", "Widget.Line5.Style", "Widget.Line6.Style"};
+
+const char *const GEOMETRY_KEYS[] = {"anchor", "x", "y", "width", "height", "opacity", "z"};
+
+void set_visible(obs_properties_t *props, const std::string &name, bool visible)
+{
+	if (obs_property_t *property = obs_properties_get(props, name.c_str()))
+		obs_property_set_visible(property, visible);
+}
+
+/* Every visibility rule in one place, run whenever anything they depend on
+ * changes. */
+bool refresh_properties(obs_properties_t *props, obs_property_t *property, obs_data_t *settings)
+{
+	UNUSED_PARAMETER(property);
+
+	const bool free_layout = (Arrangement)obs_data_get_int(settings, "layout") == Arrangement::Free;
+	const bool custom_style = (WidgetStyle)obs_data_get_int(settings, "style") == WidgetStyle::Custom;
+	const bool advanced = obs_data_get_bool(settings, "show_advanced");
+
+	/* Main view. */
+	set_visible(props, "fixed_color",
+		    (ColorSource)obs_data_get_int(settings, "color_source") == ColorSource::Fixed);
+	set_visible(props, "font", !custom_style);
+	set_visible(props, "text_scale", !free_layout);
+	set_visible(props, "bar_position", !free_layout);
+	set_visible(props, "long_text", !custom_style);
+
+	/* Advanced: fine tuning. */
+	set_visible(props, "tuning_group", advanced);
+	set_visible(props, "spacing", !free_layout);
+	set_visible(props, "art_scale", !free_layout);
+	set_visible(props, "radius", obs_data_get_bool(settings, "radius_override"));
+
+	const ArtAnimation animation = (ArtAnimation)obs_data_get_int(settings, "art_animation");
+	set_visible(props, "art_spin_rpm", animation == ArtAnimation::Spin);
+	set_visible(props, "art_pulse_percent", animation == ArtAnimation::Pulse);
+	set_visible(props, "art_pulse_rate", animation == ArtAnimation::Pulse);
+
+	/* Lines. */
+	for (int slot = 0; slot < TEXT_SLOTS; slot++) {
+		const std::string prefix = text_prefix(slot);
+		const bool own_style = custom_style || obs_data_get_bool(settings, key_for(prefix, "custom").c_str());
+
+		if (slot >= MAIN_LINES)
+			set_visible(props, key_for(prefix, "enable"), advanced);
+
+		set_visible(props, key_for(prefix, "details"), advanced);
+		set_visible(props, key_for(prefix, "custom"), !custom_style);
+		for (const char *key : GEOMETRY_KEYS)
+			set_visible(props, key_for(prefix, key), free_layout);
+
+		set_visible(props, key_for(prefix, "style"), advanced && own_style);
+
+		const TextOverflow overflow =
+			(TextOverflow)obs_data_get_int(settings, key_for(prefix, "overflow").c_str());
+		const bool marquee = overflow == TextOverflow::Marquee;
+		set_visible(props, key_for(prefix, "marquee_style"), marquee);
+		set_visible(props, key_for(prefix, "marquee_speed"), marquee);
+		set_visible(props, key_for(prefix, "marquee_gap"), marquee);
+		set_visible(props, key_for(prefix, "marquee_pause"), marquee);
+		set_visible(props, key_for(prefix, "ellipsis_side"), overflow == TextOverflow::Ellipsis);
+		set_visible(props, key_for(prefix, "max_lines"), overflow == TextOverflow::Wrap);
+		set_visible(props, key_for(prefix, "shrink_min"), overflow == TextOverflow::Shrink);
+	}
+
+	/* Elements: positions only under Free placement, looks only under the
+	 * Custom style. */
+	set_visible(props, "art_details", advanced && free_layout);
+	set_visible(props, "art_style", advanced && custom_style);
+	set_visible(props, "bg_style", advanced && custom_style);
+	set_visible(props, "bar_details", advanced && free_layout);
+	set_visible(props, "bar_style", advanced && custom_style);
+
+	const BackgroundType type = (BackgroundType)obs_data_get_int(settings, "bg_type");
+	set_visible(props, "bg_color", type != BackgroundType::Image && type != BackgroundType::BlurredArt);
+	set_visible(props, "bg_accent", type == BackgroundType::Color || type == BackgroundType::Gradient);
+	set_visible(props, "bg_color2", type == BackgroundType::Gradient);
+	set_visible(props, "bg_gradient_angle", type == BackgroundType::Gradient);
+	set_visible(props, "bg_image", type == BackgroundType::Image);
+	set_visible(props, "bg_blur", type == BackgroundType::BlurredArt);
+	set_visible(props, "bg_darken", type == BackgroundType::BlurredArt);
+	set_visible(props, "bg_desaturate", type == BackgroundType::BlurredArt);
+
+	return true;
+}
+
+#ifdef VOID_RADIO_ENABLE_EDITOR
+bool open_editor_clicked(obs_properties_t *props, obs_property_t *property, void *data)
+{
+	UNUSED_PARAMETER(props);
+	UNUSED_PARAMETER(property);
+
+	MusicWidget *widget = static_cast<MusicWidget *>(data);
+	if (widget && widget->self)
+		open_widget_editor(widget->self);
+
+	return false;
+}
+#endif
+
+void add_anchor_list(obs_properties_t *props, const std::string &prefix)
 {
 	obs_property_t *anchor = obs_properties_add_list(props, key_for(prefix, "anchor").c_str(),
 							 obs_module_text("Widget.Anchor"), OBS_COMBO_TYPE_LIST,
@@ -55,7 +169,7 @@ static void add_anchor_list(obs_properties_t *props, const std::string &prefix)
 
 /* The bar has an opacity control on each of its own fill layers, so the
  * element level one would only be a second way to say the same thing. */
-static void add_geometry_properties(obs_properties_t *props, const std::string &prefix, bool include_opacity = true)
+void add_geometry_properties(obs_properties_t *props, const std::string &prefix, bool include_opacity = true)
 {
 	add_anchor_list(props, prefix);
 
@@ -83,81 +197,11 @@ static void add_geometry_properties(obs_properties_t *props, const std::string &
 	obs_property_set_long_description(z, obs_module_text("Widget.Layer.Description"));
 }
 
-/* Shows only the backdrop controls that the chosen fill needs. */
-static bool background_type_modified(obs_properties_t *props, obs_property_t *property, obs_data_t *settings)
-{
-	UNUSED_PARAMETER(property);
-
-	const BackgroundType type = (BackgroundType)obs_data_get_int(settings, "bg_type");
-
-	const auto set_visible = [&](const char *name, bool visible) {
-		obs_property_t *target = obs_properties_get(props, name);
-		if (target)
-			obs_property_set_visible(target, visible);
-	};
-
-	set_visible("bg_color", type != BackgroundType::Image && type != BackgroundType::BlurredArt);
-	set_visible("bg_accent", type == BackgroundType::Color || type == BackgroundType::Gradient);
-	set_visible("bg_color2", type == BackgroundType::Gradient);
-	set_visible("bg_gradient_angle", type == BackgroundType::Gradient);
-	set_visible("bg_image", type == BackgroundType::Image);
-	set_visible("bg_blur", type == BackgroundType::BlurredArt);
-	set_visible("bg_darken", type == BackgroundType::BlurredArt);
-	set_visible("bg_desaturate", type == BackgroundType::BlurredArt);
-
-	return true;
-}
-
-/* Shows only the overflow controls that the chosen mode needs. */
-static bool overflow_modified(obs_properties_t *props, obs_property_t *property, obs_data_t *settings)
-{
-	const std::string name = obs_property_name(property);
-	if (name.size() < 8)
-		return false;
-
-	const std::string prefix = name.substr(0, name.size() - 8); /* drop "overflow" */
-	const TextOverflow overflow = (TextOverflow)obs_data_get_int(settings, name.c_str());
-
-	const auto set_visible = [&](const char *suffix, bool visible) {
-		obs_property_t *target = obs_properties_get(props, key_for(prefix, suffix).c_str());
-		if (target)
-			obs_property_set_visible(target, visible);
-	};
-
-	set_visible("marquee_style", overflow == TextOverflow::Marquee);
-	set_visible("marquee_speed", overflow == TextOverflow::Marquee);
-	set_visible("marquee_gap", overflow == TextOverflow::Marquee);
-	set_visible("marquee_pause", overflow == TextOverflow::Marquee);
-	set_visible("ellipsis_side", overflow == TextOverflow::Ellipsis);
-	set_visible("max_lines", overflow == TextOverflow::Wrap);
-	set_visible("shrink_min", overflow == TextOverflow::Shrink);
-
-	return true;
-}
-
-/* Shows only the art animation controls in use. */
-static bool art_animation_modified(obs_properties_t *props, obs_property_t *property, obs_data_t *settings)
-{
-	UNUSED_PARAMETER(property);
-
-	const ArtAnimation animation = (ArtAnimation)obs_data_get_int(settings, "art_animation");
-
-	const auto set_visible = [&](const char *name, bool visible) {
-		obs_property_t *target = obs_properties_get(props, name);
-		if (target)
-			obs_property_set_visible(target, visible);
-	};
-
-	set_visible("art_spin_rpm", animation == ArtAnimation::Spin);
-	set_visible("art_pulse_percent", animation == ArtAnimation::Pulse);
-	set_visible("art_pulse_rate", animation == ArtAnimation::Pulse);
-
-	return true;
-}
-
-static void add_background_properties(obs_properties_t *props)
+void add_background_properties(obs_properties_t *props)
 {
 	obs_properties_t *group = obs_properties_create();
+
+	obs_properties_add_bool(group, "bg_enable", obs_module_text("Widget.Visible"));
 
 	obs_property_t *type = obs_properties_add_list(group, "bg_type", obs_module_text("Widget.Background.Type"),
 						       OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
@@ -166,7 +210,7 @@ static void add_background_properties(obs_properties_t *props)
 	obs_property_list_add_int(type, obs_module_text("Bar.FillType.Image"), (int64_t)BackgroundType::Image);
 	obs_property_list_add_int(type, obs_module_text("Widget.Background.BlurredArt"),
 				  (int64_t)BackgroundType::BlurredArt);
-	obs_property_set_modified_callback(type, background_type_modified);
+	obs_property_set_modified_callback(type, refresh_properties);
 
 	obs_properties_add_color_alpha(group, "bg_color", obs_module_text("Bar.Color"));
 	obs_properties_add_bool(group, "bg_accent", obs_module_text("Bar.FollowAccent"));
@@ -207,14 +251,18 @@ static void add_background_properties(obs_properties_t *props)
 
 	obs_properties_add_int(group, "bg_z", obs_module_text("Widget.Layer"), -1000, 1000, 1);
 
-	obs_properties_add_group(props, "bg_enable", obs_module_text("Widget.Background"), OBS_GROUP_CHECKABLE, group);
+	obs_properties_add_group(props, "bg_style", obs_module_text("Widget.BackgroundStyle"), OBS_GROUP_NORMAL, group);
 }
 
-static void add_art_properties(obs_properties_t *props)
+void add_art_properties(obs_properties_t *props)
 {
 	obs_properties_t *group = obs_properties_create();
 
+	obs_properties_add_bool(group, "art_enable", obs_module_text("Widget.Visible"));
 	add_geometry_properties(group, "art_");
+	obs_properties_add_group(props, "art_details", obs_module_text("Widget.ArtPosition"), OBS_GROUP_NORMAL, group);
+
+	group = obs_properties_create();
 
 	obs_property_t *fit = obs_properties_add_list(group, "art_fit", obs_module_text("Widget.Art.Fit"),
 						      OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
@@ -239,45 +287,14 @@ static void add_art_properties(obs_properties_t *props)
 		group, "art_rotation", obs_module_text("Widget.Rotation"), -180.0, 180.0, 1.0);
 	obs_property_float_set_suffix(rotation, "°");
 
-	obs_property_t *animation = obs_properties_add_list(group, "art_animation",
-							    obs_module_text("Widget.Art.Animation"),
-							    OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
-	obs_property_list_add_int(animation, obs_module_text("Widget.Art.Animation.None"), (int64_t)ArtAnimation::None);
-	obs_property_list_add_int(animation, obs_module_text("Widget.Art.Animation.Spin"), (int64_t)ArtAnimation::Spin);
-	obs_property_list_add_int(animation, obs_module_text("Widget.Art.Animation.Pulse"),
-				  (int64_t)ArtAnimation::Pulse);
-	obs_property_set_modified_callback(animation, art_animation_modified);
-	obs_property_set_long_description(animation, obs_module_text("Widget.Art.Animation.Description"));
-
-	obs_property_t *rpm = obs_properties_add_float_slider(group, "art_spin_rpm", obs_module_text("Widget.Art.Rpm"),
-							      0.0, 120.0, 0.5);
-	obs_property_float_set_suffix(rpm, " rpm");
-
-	obs_property_t *pulse = obs_properties_add_float_slider(
-		group, "art_pulse_percent", obs_module_text("Widget.Art.PulseAmount"), 0.0, 50.0, 0.5);
-	obs_property_float_set_suffix(pulse, "%");
-
-	obs_property_t *rate = obs_properties_add_float_slider(group, "art_pulse_rate",
-							       obs_module_text("Widget.Art.PulseRate"), 0.1, 10.0, 0.1);
-	obs_property_float_set_suffix(rate, " Hz");
-
-	obs_property_t *placeholder = obs_properties_add_path(group, "art_placeholder",
-							      obs_module_text("Widget.Art.Placeholder"), OBS_PATH_FILE,
-							      obs_module_text("Bar.Image.Filter"), nullptr);
-	obs_property_set_long_description(placeholder, obs_module_text("Widget.Art.Placeholder.Description"));
-
-	obs_properties_add_group(props, "art_enable", obs_module_text("Widget.Art"), OBS_GROUP_CHECKABLE, group);
+	obs_properties_add_group(props, "art_style", obs_module_text("Widget.ArtStyle"), OBS_GROUP_NORMAL, group);
 }
 
-static void add_text_properties(obs_properties_t *props, int slot)
+void add_line_details(obs_properties_t *props, int slot)
 {
 	const std::string prefix = text_prefix(slot);
 
 	obs_properties_t *group = obs_properties_create();
-
-	obs_property_t *format = obs_properties_add_text(group, key_for(prefix, "format").c_str(),
-							 obs_module_text("Info.Format"), OBS_TEXT_MULTILINE);
-	obs_property_set_long_description(format, obs_module_text("Info.Fields"));
 
 	obs_properties_add_text(group, key_for(prefix, "idle_format").c_str(), obs_module_text("Info.IdleFormat"),
 				OBS_TEXT_MULTILINE);
@@ -286,7 +303,26 @@ static void add_text_properties(obs_properties_t *props, int slot)
 							     obs_module_text("Widget.Text.HideEmpty"));
 	obs_property_set_long_description(hide_empty, obs_module_text("Widget.Text.HideEmpty.Description"));
 
+	obs_property_t *role = obs_properties_add_list(group, key_for(prefix, "role").c_str(),
+						       obs_module_text("Widget.Line.Role"), OBS_COMBO_TYPE_LIST,
+						       OBS_COMBO_FORMAT_INT);
+	obs_property_list_add_int(role, obs_module_text("Widget.Line.Role.Title"), (int64_t)LineRole::Title);
+	obs_property_list_add_int(role, obs_module_text("Widget.Line.Role.Subtitle"), (int64_t)LineRole::Subtitle);
+	obs_property_list_add_int(role, obs_module_text("Widget.Line.Role.Detail"), (int64_t)LineRole::Detail);
+	obs_property_list_add_int(role, obs_module_text("Widget.Line.Role.Time"), (int64_t)LineRole::Time);
+	obs_property_set_long_description(role, obs_module_text("Widget.Line.Role.Description"));
+
+	obs_property_t *custom = obs_properties_add_bool(group, key_for(prefix, "custom").c_str(),
+							 obs_module_text("Widget.Line.Custom"));
+	obs_property_set_long_description(custom, obs_module_text("Widget.Line.Custom.Description"));
+	obs_property_set_modified_callback(custom, refresh_properties);
+
 	add_geometry_properties(group, prefix);
+
+	obs_properties_add_group(props, key_for(prefix, "details").c_str(), obs_module_text(LINE_DETAILS[slot]),
+				 OBS_GROUP_NORMAL, group);
+
+	group = obs_properties_create();
 
 	obs_property_t *font =
 		obs_properties_add_font(group, key_for(prefix, "font").c_str(), obs_module_text("Widget.Text.Font"));
@@ -367,7 +403,7 @@ static void add_text_properties(obs_properties_t *props, int slot)
 	obs_property_list_add_int(overflow, obs_module_text("Widget.Text.Overflow.Ellipsis"),
 				  (int64_t)TextOverflow::Ellipsis);
 	obs_property_list_add_int(overflow, obs_module_text("Widget.Text.Overflow.Wrap"), (int64_t)TextOverflow::Wrap);
-	obs_property_set_modified_callback(overflow, overflow_modified);
+	obs_property_set_modified_callback(overflow, refresh_properties);
 
 	obs_property_t *marquee_style = obs_properties_add_list(group, key_for(prefix, "marquee_style").c_str(),
 								obs_module_text("Widget.Text.MarqueeStyle"),
@@ -410,10 +446,210 @@ static void add_text_properties(obs_properties_t *props, int slot)
 								 1.0);
 	obs_property_float_set_suffix(shrink, "%");
 
-	const std::string label = std::string(obs_module_text("Widget.Text.Slot")) + ' ' + std::to_string(slot + 1);
-
-	obs_properties_add_group(props, key_for(prefix, "enable").c_str(), label.c_str(), OBS_GROUP_CHECKABLE, group);
+	obs_properties_add_group(props, key_for(prefix, "style").c_str(), obs_module_text(LINE_STYLE[slot]),
+				 OBS_GROUP_NORMAL, group);
 }
+
+void add_line_main(obs_properties_t *props, int slot)
+{
+	const std::string prefix = text_prefix(slot);
+	obs_properties_t *group = obs_properties_create();
+
+	obs_property_t *format = obs_properties_add_text(group, key_for(prefix, "format").c_str(),
+							 obs_module_text("Widget.LineText"), OBS_TEXT_DEFAULT);
+	obs_property_set_long_description(format, obs_module_text("Info.Fields"));
+
+	obs_properties_add_group(props, key_for(prefix, "enable").c_str(), obs_module_text(LINE_NAMES[slot]),
+				 OBS_GROUP_CHECKABLE, group);
+}
+
+void add_list_item(obs_property_t *list, const char *text, int64_t value)
+{
+	obs_property_list_add_int(list, obs_module_text(text), value);
+}
+
+obs_property_t *add_list(obs_properties_t *props, const char *name, const char *text)
+{
+	return obs_properties_add_list(props, name, obs_module_text(text), OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+}
+
+void add_layout_group(obs_properties_t *props, void *data)
+{
+	obs_properties_t *group = obs_properties_create();
+
+	obs_property_t *layout = add_list(group, "layout", "Widget.Layout");
+	add_list_item(layout, "Widget.Layout.ArtLeft", (int64_t)Arrangement::ArtLeft);
+	add_list_item(layout, "Widget.Layout.ArtRight", (int64_t)Arrangement::ArtRight);
+	add_list_item(layout, "Widget.Layout.Stacked", (int64_t)Arrangement::Stacked);
+	add_list_item(layout, "Widget.Layout.Backdrop", (int64_t)Arrangement::Backdrop);
+	add_list_item(layout, "Widget.Layout.Compact", (int64_t)Arrangement::Compact);
+	add_list_item(layout, "Widget.Layout.TextOnly", (int64_t)Arrangement::TextOnly);
+	add_list_item(layout, "Widget.Layout.Free", (int64_t)Arrangement::Free);
+	obs_property_set_long_description(layout, obs_module_text("Widget.Layout.Description"));
+	obs_property_set_modified_callback(layout, refresh_properties);
+
+	obs_properties_add_int(group, "width", obs_module_text("Widget.CanvasWidth"), 16, 8192, 1);
+	obs_properties_add_int(group, "height", obs_module_text("Widget.CanvasHeight"), 16, 8192, 1);
+
+#ifdef VOID_RADIO_ENABLE_EDITOR
+	obs_properties_add_button2(group, "open_editor", obs_module_text("Widget.OpenEditor"), open_editor_clicked,
+				   data);
+#else
+	UNUSED_PARAMETER(data);
+#endif
+
+	obs_properties_add_group(props, "layout_group", obs_module_text("Widget.Group.Layout"), OBS_GROUP_NORMAL,
+				 group);
+}
+
+void add_style_group(obs_properties_t *props)
+{
+	obs_properties_t *group = obs_properties_create();
+
+	obs_property_t *style = add_list(group, "style", "Widget.Style");
+	add_list_item(style, "Widget.Style.Glass", (int64_t)WidgetStyle::Glass);
+	add_list_item(style, "Widget.Style.Solid", (int64_t)WidgetStyle::Solid);
+	add_list_item(style, "Widget.Style.Minimal", (int64_t)WidgetStyle::Minimal);
+	add_list_item(style, "Widget.Style.Outline", (int64_t)WidgetStyle::Outline);
+	add_list_item(style, "Widget.Style.Vinyl", (int64_t)WidgetStyle::Vinyl);
+	add_list_item(style, "Widget.Style.Custom", (int64_t)WidgetStyle::Custom);
+	obs_property_set_long_description(style, obs_module_text("Widget.Style.Description"));
+	obs_property_set_modified_callback(style, refresh_properties);
+
+	obs_property_t *source = add_list(group, "color_source", "Widget.ColorSource");
+	add_list_item(source, "Widget.ColorSource.Album", (int64_t)ColorSource::Album);
+	add_list_item(source, "Widget.ColorSource.Fixed", (int64_t)ColorSource::Fixed);
+	obs_property_set_long_description(source, obs_module_text("Widget.ColorSource.Description"));
+	obs_property_set_modified_callback(source, refresh_properties);
+
+	obs_properties_add_color_alpha(group, "fixed_color", obs_module_text("Widget.FixedColor"));
+
+	obs_property_t *font = obs_properties_add_font(group, "font", obs_module_text("Widget.Font"));
+	obs_property_set_long_description(font, obs_module_text("Widget.Font.Description"));
+
+	obs_property_t *scale =
+		obs_properties_add_int_slider(group, "text_scale", obs_module_text("Widget.TextScale"), 50, 200, 5);
+	obs_property_int_set_suffix(scale, "%");
+
+	obs_properties_add_group(props, "style_group", obs_module_text("Widget.Group.Style"), OBS_GROUP_NORMAL, group);
+}
+
+void add_text_group(obs_properties_t *props)
+{
+	obs_properties_t *group = obs_properties_create();
+
+	obs_property_t *long_text = add_list(group, "long_text", "Widget.LongText");
+	add_list_item(long_text, "Widget.Text.Overflow.Marquee", (int64_t)LongText::Scroll);
+	add_list_item(long_text, "Widget.Text.Overflow.Shrink", (int64_t)LongText::Shrink);
+	add_list_item(long_text, "Widget.Text.Overflow.Ellipsis", (int64_t)LongText::Truncate);
+
+	obs_property_t *bar = add_list(group, "bar_position", "Widget.BarPosition");
+	add_list_item(bar, "Widget.BarPosition.UnderText", (int64_t)BarPlacement::UnderText);
+	add_list_item(bar, "Widget.BarPosition.BottomEdge", (int64_t)BarPlacement::BottomEdge);
+	add_list_item(bar, "Widget.BarPosition.Off", (int64_t)BarPlacement::Off);
+
+	obs_property_t *idle = add_list(group, "idle_mode", "Widget.Idle");
+	add_list_item(idle, "Widget.Idle.Hide", (int64_t)WidgetIdle::Hide);
+	add_list_item(idle, "Widget.Idle.Placeholder", (int64_t)WidgetIdle::Placeholder);
+	add_list_item(idle, "Widget.Idle.Freeze", (int64_t)WidgetIdle::Freeze);
+	obs_property_set_long_description(idle, obs_module_text("Widget.Idle.Description"));
+
+	obs_property_t *transition = add_list(group, "transition", "Widget.Transition");
+	add_list_item(transition, "Widget.Transition.None", (int64_t)TrackTransition::None);
+	add_list_item(transition, "Widget.Transition.CrossFade", (int64_t)TrackTransition::CrossFade);
+	add_list_item(transition, "Widget.Transition.Slide", (int64_t)TrackTransition::Slide);
+	add_list_item(transition, "Widget.Transition.FadeThroughBlank", (int64_t)TrackTransition::FadeThroughBlank);
+
+	obs_properties_add_group(props, "text_group", obs_module_text("Widget.Group.Text"), OBS_GROUP_NORMAL, group);
+}
+
+void add_tuning_group(obs_properties_t *props)
+{
+	obs_properties_t *group = obs_properties_create();
+
+	obs_property_t *spacing =
+		obs_properties_add_int_slider(group, "spacing", obs_module_text("Widget.Spacing"), 0, 250, 5);
+	obs_property_int_set_suffix(spacing, "%");
+
+	obs_property_t *art_scale =
+		obs_properties_add_int_slider(group, "art_scale", obs_module_text("Widget.ArtScale"), 20, 100, 5);
+	obs_property_int_set_suffix(art_scale, "%");
+
+	obs_property_t *shape = add_list(group, "art_shape", "Widget.ArtShape");
+	add_list_item(shape, "Widget.ArtShape.FromStyle", (int64_t)ArtShape::FromStyle);
+	add_list_item(shape, "Widget.ArtShape.Square", (int64_t)ArtShape::Square);
+	add_list_item(shape, "Widget.ArtShape.Rounded", (int64_t)ArtShape::Rounded);
+	add_list_item(shape, "Widget.ArtShape.Circle", (int64_t)ArtShape::Circle);
+
+	obs_property_t *override_radius =
+		obs_properties_add_bool(group, "radius_override", obs_module_text("Widget.RadiusOverride"));
+	obs_property_set_modified_callback(override_radius, refresh_properties);
+
+	obs_property_t *radius =
+		obs_properties_add_float_slider(group, "radius", obs_module_text("Bar.CornerRadius"), 0.0, 256.0, 1.0);
+	obs_property_float_set_suffix(radius, " px");
+
+	obs_property_t *animation = obs_properties_add_list(group, "art_animation",
+							    obs_module_text("Widget.Art.Animation"),
+							    OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+	obs_property_list_add_int(animation, obs_module_text("Widget.Art.Animation.None"), (int64_t)ArtAnimation::None);
+	obs_property_list_add_int(animation, obs_module_text("Widget.Art.Animation.Spin"), (int64_t)ArtAnimation::Spin);
+	obs_property_list_add_int(animation, obs_module_text("Widget.Art.Animation.Pulse"),
+				  (int64_t)ArtAnimation::Pulse);
+	obs_property_set_modified_callback(animation, refresh_properties);
+	obs_property_set_long_description(animation, obs_module_text("Widget.Art.Animation.Description"));
+
+	obs_property_t *rpm = obs_properties_add_float_slider(group, "art_spin_rpm", obs_module_text("Widget.Art.Rpm"),
+							      0.0, 120.0, 0.5);
+	obs_property_float_set_suffix(rpm, " rpm");
+
+	obs_property_t *pulse = obs_properties_add_float_slider(
+		group, "art_pulse_percent", obs_module_text("Widget.Art.PulseAmount"), 0.0, 50.0, 0.5);
+	obs_property_float_set_suffix(pulse, "%");
+
+	obs_property_t *rate = obs_properties_add_float_slider(group, "art_pulse_rate",
+							       obs_module_text("Widget.Art.PulseRate"), 0.1, 10.0, 0.1);
+	obs_property_float_set_suffix(rate, " Hz");
+
+	obs_property_t *placeholder = obs_properties_add_path(group, "art_placeholder",
+							      obs_module_text("Widget.Art.Placeholder"), OBS_PATH_FILE,
+							      obs_module_text("Bar.Image.Filter"), nullptr);
+	obs_property_set_long_description(placeholder, obs_module_text("Widget.Art.Placeholder.Description"));
+
+	obs_property_t *time_format = add_list(group, "time_format", "Info.TimeFormat");
+	add_list_item(time_format, "Info.TimeFormat.Auto", (int64_t)TimeFormat::Auto);
+	add_list_item(time_format, "Info.TimeFormat.MSS", (int64_t)TimeFormat::MSS);
+	add_list_item(time_format, "Info.TimeFormat.MMSS", (int64_t)TimeFormat::MMSS);
+	add_list_item(time_format, "Info.TimeFormat.HMMSS", (int64_t)TimeFormat::HMMSS);
+	add_list_item(time_format, "Info.TimeFormat.HHMMSS", (int64_t)TimeFormat::HHMMSS);
+
+	obs_property_t *transition_ms = obs_properties_add_int_slider(
+		group, "transition_ms", obs_module_text("Widget.TransitionDuration"), 0, 3000, 10);
+	obs_property_int_set_suffix(transition_ms, " ms");
+
+	obs_property_t *idle_trigger = add_list(group, "idle_trigger", "Common.IdleTrigger");
+	add_list_item(idle_trigger, "Common.IdleTrigger.Stopped", (int64_t)WidgetIdleTrigger::Stopped);
+	add_list_item(idle_trigger, "Common.IdleTrigger.StoppedOrPaused", (int64_t)WidgetIdleTrigger::StoppedOrPaused);
+	obs_property_set_long_description(idle_trigger, obs_module_text("Common.IdleTrigger.Description"));
+
+	obs_properties_add_group(props, "tuning_group", obs_module_text("Widget.Group.Tuning"), OBS_GROUP_NORMAL,
+				 group);
+}
+
+void add_bar_groups(obs_properties_t *props)
+{
+	obs_properties_t *position = obs_properties_create();
+	obs_properties_add_bool(position, "bar_enable", obs_module_text("Widget.Visible"));
+	add_geometry_properties(position, "bar_", false);
+	obs_properties_add_group(props, "bar_details", obs_module_text("Widget.BarPositionGroup"), OBS_GROUP_NORMAL,
+				 position);
+
+	obs_properties_t *style = obs_properties_create();
+	BarRenderer::add_properties(style, "bar_", false, true);
+	obs_properties_add_group(props, "bar_style", obs_module_text("Widget.BarStyle"), OBS_GROUP_NORMAL, style);
+}
+
+} // namespace
 
 obs_properties_t *widget_properties(void *data)
 {
@@ -421,73 +657,30 @@ obs_properties_t *widget_properties(void *data)
 
 	MusicLink::add_property(props);
 
-	obs_properties_add_int(props, "width", obs_module_text("Widget.CanvasWidth"), 16, 8192, 1);
-	obs_properties_add_int(props, "height", obs_module_text("Widget.CanvasHeight"), 16, 8192, 1);
+	add_layout_group(props, data);
+	add_style_group(props);
 
-	obs_property_t *preset = obs_properties_add_list(props, "preset", obs_module_text("Widget.Preset"),
-							 OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
-	obs_property_list_add_int(preset, obs_module_text("Widget.Preset.ArtLeft"), (int64_t)LayoutPreset::ArtLeft);
-	obs_property_list_add_int(preset, obs_module_text("Widget.Preset.ArtRight"), (int64_t)LayoutPreset::ArtRight);
-	obs_property_list_add_int(preset, obs_module_text("Widget.Preset.VerticalCard"),
-				  (int64_t)LayoutPreset::VerticalCard);
-	obs_property_list_add_int(preset, obs_module_text("Widget.Preset.WideBanner"),
-				  (int64_t)LayoutPreset::WideBanner);
-	obs_property_list_add_int(preset, obs_module_text("Widget.Preset.CompactBar"),
-				  (int64_t)LayoutPreset::CompactBar);
-	obs_property_list_add_int(preset, obs_module_text("Widget.Preset.TextOnly"), (int64_t)LayoutPreset::TextOnly);
-	obs_property_set_long_description(preset, obs_module_text("Widget.Preset.Description"));
+	for (int slot = 0; slot < MAIN_LINES; slot++)
+		add_line_main(props, slot);
 
-	obs_properties_add_button2(props, "apply_preset", obs_module_text("Widget.Preset.Apply"), preset_clicked, data);
+	add_text_group(props);
 
-	obs_property_t *time_format = obs_properties_add_list(props, "time_format", obs_module_text("Info.TimeFormat"),
-							      OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
-	obs_property_list_add_int(time_format, obs_module_text("Info.TimeFormat.Auto"), (int64_t)TimeFormat::Auto);
-	obs_property_list_add_int(time_format, obs_module_text("Info.TimeFormat.MSS"), (int64_t)TimeFormat::MSS);
-	obs_property_list_add_int(time_format, obs_module_text("Info.TimeFormat.MMSS"), (int64_t)TimeFormat::MMSS);
-	obs_property_list_add_int(time_format, obs_module_text("Info.TimeFormat.HMMSS"), (int64_t)TimeFormat::HMMSS);
-	obs_property_list_add_int(time_format, obs_module_text("Info.TimeFormat.HHMMSS"), (int64_t)TimeFormat::HHMMSS);
+	obs_property_t *advanced =
+		obs_properties_add_bool(props, "show_advanced", obs_module_text("Widget.ShowAdvanced"));
+	obs_property_set_modified_callback(advanced, refresh_properties);
 
-	obs_property_t *transition = obs_properties_add_list(props, "transition", obs_module_text("Widget.Transition"),
-							     OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
-	obs_property_list_add_int(transition, obs_module_text("Widget.Transition.None"),
-				  (int64_t)TrackTransition::None);
-	obs_property_list_add_int(transition, obs_module_text("Widget.Transition.CrossFade"),
-				  (int64_t)TrackTransition::CrossFade);
-	obs_property_list_add_int(transition, obs_module_text("Widget.Transition.Slide"),
-				  (int64_t)TrackTransition::Slide);
-	obs_property_list_add_int(transition, obs_module_text("Widget.Transition.FadeThroughBlank"),
-				  (int64_t)TrackTransition::FadeThroughBlank);
+	/* Everything below is advanced. */
+	add_tuning_group(props);
 
-	obs_property_t *transition_ms = obs_properties_add_int_slider(
-		props, "transition_ms", obs_module_text("Widget.TransitionDuration"), 0, 3000, 10);
-	obs_property_int_set_suffix(transition_ms, " ms");
-
-	obs_property_t *idle = obs_properties_add_list(props, "idle_mode", obs_module_text("Widget.Idle"),
-						       OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
-	obs_property_list_add_int(idle, obs_module_text("Widget.Idle.Hide"), (int64_t)WidgetIdle::Hide);
-	obs_property_list_add_int(idle, obs_module_text("Widget.Idle.Placeholder"), (int64_t)WidgetIdle::Placeholder);
-	obs_property_list_add_int(idle, obs_module_text("Widget.Idle.Freeze"), (int64_t)WidgetIdle::Freeze);
-	obs_property_set_long_description(idle, obs_module_text("Widget.Idle.Description"));
-
-	obs_property_t *idle_trigger = obs_properties_add_list(props, "idle_trigger",
-							       obs_module_text("Common.IdleTrigger"),
-							       OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
-	obs_property_list_add_int(idle_trigger, obs_module_text("Common.IdleTrigger.Stopped"),
-				  (int64_t)WidgetIdleTrigger::Stopped);
-	obs_property_list_add_int(idle_trigger, obs_module_text("Common.IdleTrigger.StoppedOrPaused"),
-				  (int64_t)WidgetIdleTrigger::StoppedOrPaused);
-	obs_property_set_long_description(idle_trigger, obs_module_text("Common.IdleTrigger.Description"));
-
-	add_background_properties(props);
-	add_art_properties(props);
+	for (int slot = MAIN_LINES; slot < TEXT_SLOTS; slot++)
+		add_line_main(props, slot);
 
 	for (int slot = 0; slot < TEXT_SLOTS; slot++)
-		add_text_properties(props, slot);
+		add_line_details(props, slot);
 
-	obs_properties_t *bar_group = obs_properties_create();
-	add_geometry_properties(bar_group, "bar_", false);
-	BarRenderer::add_properties(bar_group, "bar_", false, true);
-	obs_properties_add_group(props, "bar_enable", obs_module_text("Widget.Bar"), OBS_GROUP_CHECKABLE, bar_group);
+	add_art_properties(props);
+	add_background_properties(props);
+	add_bar_groups(props);
 
 	return props;
 }

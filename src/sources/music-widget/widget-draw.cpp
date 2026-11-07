@@ -206,14 +206,26 @@ gs_texture_t *create_texture(const RgbaImage &image)
 	return texture;
 }
 
+bool current_accent(const MusicWidget *widget, uint32_t &color)
+{
+	if (widget->fixed_accent) {
+		color = widget->fixed_color;
+		return true;
+	}
+
+	color = widget->accent;
+	return widget->accent_valid;
+}
+
 uint32_t resolve_color(const MusicWidget *widget, uint32_t color, bool follow_accent)
 {
-	if (!follow_accent || !widget->accent_valid)
+	uint32_t accent = 0;
+	if (!follow_accent || !current_accent(widget, accent))
 		return color;
 
 	/* The accent replaces the colour but keeps whatever alpha was set, so
 	 * a translucent panel stays translucent. */
-	return (widget->accent & 0x00FFFFFF) | (color & 0xFF000000);
+	return (accent & 0x00FFFFFF) | (color & 0xFF000000);
 }
 
 } // namespace vr::widget
