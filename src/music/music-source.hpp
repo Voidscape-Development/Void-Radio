@@ -18,14 +18,15 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 
 #pragma once
 
+#include "music/command-queue.hpp"
+#include "music/library-worker.hpp"
 #include "music/music-api.hpp"
-#include "music/playlist.hpp"
+#include "music/player.hpp"
+#include "music/source-hotkeys.hpp"
 
 #include <obs-module.h>
-#include <media-io/audio-io.h>
 
 #include <atomic>
-#include <condition_variable>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -34,24 +35,27 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 
 namespace vr {
 
+void register_music_source();
+
 /*
- * A playlist driven audio source.
+ * The "Music" source: the OBS side of the playback engine.
  *
- * Decoding is delegated to private `ffmpeg_source` children ("decks"), one per
- * track being played. Their audio is captured, gain staged and mixed back out
- * through this source, which means the plugin only has to own playlist and
- * transport logic while OBS keeps handling formats, seeking and timing. Mixing
- * in this source (rather than letting OBS mix the children directly) is what
- * lets the music land in the mixer as one channel with working volume, filters
- * and monitoring.
+ * Threads, and what each one owns:
  *
- * Two decks are alive at once during a crossfade: the outgoing deck keeps
- * driving the output while the incoming one buffers, and the roles swap when
- * the outgoing deck runs dry.
+ *  - The engine thread owns the Player and everything in it. It wakes once per
+ *    block of audio, runs whatever commands have been posted, renders the
+ *    block, sends it to OBS and publishes the state that everyone else reads.
+ *  - The library worker walks folders and reads tags, and posts what it finds
+ *    back to the engine as commands.
+ *  - Each track's deck decodes on a thread of its own (see StreamDeck).
+ *  - Everything else - OBS callbacks, hotkeys, the dock, other sources - only
+ *    ever posts commands or reads the published snapshot and entry list.
+ *
+ * Output timestamps are counted in samples from when playback started, so the
+ * audio OBS receives is exactly continuous however the thread is scheduled.
  */
 class MusicSource {
 public:
-	static void register_type();
 	static MusicSource *from_source(obs_source_t *source);
 
 	MusicSource(obs_data_t *settings, obs_source_t *source);
@@ -60,13 +64,12 @@ public:
 	MusicSource(const MusicSource &) = delete;
 	MusicSource &operator=(const MusicSource &) = delete;
 
+	/* OBS callbacks. */
 	void update(obs_data_t *settings);
 	void activate();
 	void deactivate();
 
-	bool snapshot(Snapshot &out);
-	void entries(std::vector<EntryInfo> &out, int &current_index);
-
+	/* Transport. These post to the engine and return at once. */
 	void play();
 	void pause();
 	void toggle_pause();
@@ -77,180 +80,75 @@ public:
 	void seek(int64_t ms);
 	void play_index(int index);
 
-	int64_t media_time();
-	int64_t media_duration();
-	obs_media_state media_state();
+	/* Published state. Cheap, and safe from any thread. */
+	bool snapshot(Snapshot &out) const;
+	void entries(std::vector<EntryInfo> &out, int &current_index) const;
+	int64_t media_time() const;
+	int64_t media_duration() const;
+	obs_media_state media_state() const;
 
+	/* Changes made from the dock, written through to the source settings. */
 	void set_shuffle(bool shuffle);
 	void set_repeat(RepeatMode mode);
 	void set_override(const std::string &path, const std::string &title, const std::string &artist);
 	void set_order(const std::vector<std::string> &paths);
 	void remove_path(const std::string &path);
 
+	obs_source_t *source() const { return self_; }
+
 private:
-	/* Single producer, single consumer float FIFO used to hold a deck's
-	 * audio while another deck is driving the output. */
-	struct Ring {
-		std::vector<float> data;
-		size_t head = 0;
-		size_t size = 0;
+	/* Engine thread. */
+	void engine_thread();
+	void output_block(size_t frames);
+	void publish();
+	void request_tags();
 
-		void reset(size_t capacity);
-		void clear();
-		void push(const float *src, size_t count);
-		size_t pop(float *dst, size_t count);
-	};
+	void post(CommandQueue::Command command) { commands_.post(std::move(command)); }
 
-	struct Deck {
-		MusicSource *owner = nullptr;
-		obs_source_t *media = nullptr;
-		int entry_index = -1;
-		bool callback_added = false;
-
-		std::atomic<bool> driver{false};
-		std::atomic<bool> produced{false};
-		std::atomic<bool> drain_backlog{false};
-
-		/* Set once the deck reaching its end has been acted on, so that
-		 * a fade out running afterwards is not restarted on every poll
-		 * for as long as the finished deck is still around. */
-		std::atomic<bool> finish_handled{false};
-
-		std::mutex ring_mutex;
-		Ring rings[MAX_AUDIO_CHANNELS];
-		size_t ring_channels = 0;
-
-		std::mutex env_mutex;
-		double gain_from = 1.0;
-		double gain_to = 1.0;
-		uint64_t env_pos = 0;
-		uint64_t env_len = 0;
-		bool equal_power = false;
-
-		/* Wall clock deadline after which the deck is torn down, used
-		 * to retire the outgoing half of a crossfade. */
-		uint64_t expire_ns = 0;
-		uint64_t created_ns = 0;
-
-		std::vector<float> scratch[MAX_AUDIO_CHANNELS];
-		std::vector<float> drain[MAX_AUDIO_CHANNELS];
-		std::vector<float> mix_tmp;
-
-		void set_gain(double gain);
-		void fade_to(double target, uint64_t samples, bool equal);
-		void apply_gain(const float *const *in, float *const *out, size_t frames, size_t channels, bool muted);
-	};
-
-	using DeckPtr = std::shared_ptr<Deck>;
-
-	struct HotkeyContext;
-
-	static void audio_capture(void *param, obs_source_t *source, const struct audio_data *audio, bool muted);
-	void on_deck_audio(Deck *deck, const struct audio_data *audio, bool muted);
-
-	void housekeeping_thread();
-	void tick();
-	void wake();
-	void poll_playback();
-	void publish_snapshot();
-
-	void rebuild_playlist();
-	void load_pending_tags();
-
-	DeckPtr create_deck(int entry_index);
-	void start_entry(int entry_index, int crossfade_ms);
-	void destroy_deck(DeckPtr &deck);
-	void retire_all_decks();
-	void reap_decks();
-	static bool deck_finished(const Deck &deck);
-	DeckPtr current_deck();
-
-	void seek_internal(int64_t ms, bool retry);
-	void advance_track(int crossfade_ms, bool user_initiated);
-	void note_track_change(int entry_index);
-	int manual_crossfade_ms();
-
-	obs_data_t *settings();
 	void write_setting_bool(const char *name, bool value);
 	void write_setting_int(const char *name, int64_t value);
 
-	static void hotkey_pressed(void *data, obs_hotkey_id id, obs_hotkey_t *hotkey, bool pressed);
-	void register_hotkeys();
-	void unregister_hotkeys();
-
 	obs_source_t *self_ = nullptr;
+	AudioFormat format_;
+	enum speaker_layout speakers_ = SPEAKERS_STEREO;
 
-	/* Guards playlist, transport and playback bookkeeping. Lock order is
-	 * always state_mutex_ before decks_mutex_. */
-	std::mutex state_mutex_;
-	Playlist playlist_;
-	PlayState transport_ = PlayState::Stopped;
-	uint64_t track_serial_ = 0;
+	CommandQueue commands_;
 
-	int64_t last_media_ms_ = 0;
-	uint64_t last_media_ns_ = 0;
-	int64_t duration_ms_ = 0;
-	bool time_reset_ = true;
-	bool crossfade_active_ = false;
-	int consecutive_errors_ = 0;
-
-	/* A seek takes a moment to land, and a decoder in the middle of one can
-	 * report both a stale position and, briefly, a stopped state. Until the
-	 * deadline passes, the requested position is what the plugin believes
-	 * and the deck is not allowed to count as finished. */
-	int64_t seek_target_ms_ = 0;
-	uint64_t seek_settle_ns_ = 0;
-
-	/* Whether the seek in progress is already a second attempt, made after
-	 * the deck opened for the first one ended without landing. */
-	bool seek_retried_ = false;
-
-	int pending_entry_ = -1;
-	uint64_t pending_start_ns_ = 0;
-	uint64_t pending_pause_ns_ = 0;
-	uint64_t pending_stop_ns_ = 0;
-
-	bool rebuild_pending_ = true;
+	/* Owned by the engine thread once it is running. */
+	std::unique_ptr<Player> player_;
 	bool autostart_pending_ = false;
-	bool paused_by_inactive_ = false;
-
-	/* Settings mirror. */
-	std::vector<std::string> configured_paths_;
-	std::vector<PlaylistEntry> overrides_;
-	bool recurse_dirs_ = true;
-	bool shuffle_ = false;
-	RepeatMode repeat_ = RepeatMode::All;
-	int crossfade_ms_ = 0;
-	int gap_ms_ = 0;
-	int fade_in_ms_ = 0;
-	int fade_out_ms_ = 0;
-	bool play_on_start_ = false;
 	bool keep_playing_when_hidden_ = true;
-	bool skip_on_error_ = true;
+	bool paused_by_inactive_ = false;
+	std::string tags_in_flight_;
+	uint64_t published_entries_version_ = UINT64_MAX;
+	std::vector<float> block_[MAX_MIX_CHANNELS];
 
-	std::mutex decks_mutex_;
-	std::vector<DeckPtr> decks_;
-	DeckPtr current_;
+	/* Output timeline: when the current run of audio started, and how many
+	 * samples have gone out since. Reset whenever output stops. */
+	bool timeline_running_ = false;
+	uint64_t timeline_start_ns_ = 0;
+	uint64_t timeline_frames_ = 0;
 
-	/* Read by the graphics thread every frame, so it is deliberately kept
-	 * behind its own short-lived lock rather than the state mutex. */
-	std::mutex snapshot_mutex_;
-	Snapshot cached_;
-	uint64_t cached_ns_ = 0;
+	/* Last settings seen, to tell what actually changed. Touched only
+	 * from OBS's update callback. */
+	PlaylistConfig playlist_config_;
+	bool have_config_ = false;
 
-	std::atomic<bool> resume_on_tick_{false};
+	/* Published by the engine thread. */
+	mutable std::mutex snapshot_mutex_;
+	Snapshot snapshot_;
+	uint64_t snapshot_ns_ = 0;
 
+	mutable std::mutex entries_mutex_;
+	std::vector<EntryInfo> entries_;
+	int current_index_ = -1;
+
+	std::unique_ptr<LibraryWorker> library_;
+
+	std::atomic<bool> running_{false};
 	std::thread thread_;
-	std::condition_variable cv_;
-	std::atomic<bool> stop_thread_{false};
-	bool wake_flag_ = false;
 
-	obs_hotkey_id hotkey_play_pause_ = OBS_INVALID_HOTKEY_ID;
-	obs_hotkey_id hotkey_stop_ = OBS_INVALID_HOTKEY_ID;
-	obs_hotkey_id hotkey_next_ = OBS_INVALID_HOTKEY_ID;
-	obs_hotkey_id hotkey_previous_ = OBS_INVALID_HOTKEY_ID;
-	obs_hotkey_id hotkey_restart_ = OBS_INVALID_HOTKEY_ID;
-	std::vector<HotkeyContext *> hotkey_contexts_;
+	std::unique_ptr<SourceHotkeys> hotkeys_;
 };
 
 } // namespace vr

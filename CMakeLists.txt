@@ -29,6 +29,14 @@ elseif(NOT OBS_SDK_VARIANT AND libobs_VERSION VERSION_GREATER_EQUAL 33)
   )
 endif()
 
+# FFmpeg decodes the music and reads its tags. OBS ships it on every platform;
+# see cmake/common/FindFFmpeg.cmake for where it comes from.
+find_package(FFmpeg REQUIRED COMPONENTS avformat avcodec avutil swresample)
+target_link_libraries(
+  ${CMAKE_PROJECT_NAME}
+  PRIVATE FFmpeg::avformat FFmpeg::avcodec FFmpeg::avutil FFmpeg::swresample
+)
+
 if(ENABLE_FRONTEND_API)
   find_package(obs-frontend-api REQUIRED)
   target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE OBS::obs-frontend-api)
@@ -50,16 +58,39 @@ endif()
 target_sources(
   ${CMAKE_PROJECT_NAME}
   PRIVATE
+    src/audio/audio-decoder.cpp
+    src/audio/audio-decoder.hpp
+    src/audio/audio-format.hpp
+    src/audio/deck.hpp
+    src/audio/ffmpeg-util.cpp
+    src/audio/ffmpeg-util.hpp
+    src/audio/ring-buffer.cpp
+    src/audio/ring-buffer.hpp
+    src/audio/stream-deck.cpp
+    src/audio/stream-deck.hpp
     src/filters/music-info-filter.cpp
     src/filters/music-info-filter.hpp
     src/music/album-art.cpp
     src/music/album-art.hpp
+    src/music/command-queue.hpp
+    src/music/gain-envelope.cpp
+    src/music/gain-envelope.hpp
+    src/music/library-worker.cpp
+    src/music/library-worker.hpp
+    src/music/music-api.cpp
     src/music/music-api.hpp
+    src/music/music-link.cpp
+    src/music/music-source-info.cpp
+    src/music/music-source-settings.cpp
     src/music/music-source.cpp
     src/music/music-source.hpp
+    src/music/player.cpp
+    src/music/player.hpp
     src/music/playlist.cpp
     src/music/playlist.hpp
     src/music/snapshot.hpp
+    src/music/source-hotkeys.cpp
+    src/music/source-hotkeys.hpp
     src/music/track-tags.cpp
     src/music/track-tags.hpp
     src/plugin-main.cpp

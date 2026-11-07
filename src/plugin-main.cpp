@@ -46,7 +46,7 @@ MODULE_EXPORT const char *obs_module_description(void)
 
 bool obs_module_load(void)
 {
-	vr::MusicSource::register_type();
+	vr::register_music_source();
 	vr::register_progress_bar_source();
 	vr::register_music_info_filter();
 

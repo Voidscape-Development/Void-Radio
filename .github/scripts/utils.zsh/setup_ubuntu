@@ -57,8 +57,12 @@ if (( ! (${skips[(Ie)all]} + ${skips[(Ie)deps]}) )) {
 
   sudo apt-get install ${apt_args} \
     build-essential \
+    libavcodec-dev${suffix} \
+    libavformat-dev${suffix} \
+    libavutil-dev${suffix} \
     libgles2-mesa-dev \
     libsimde-dev \
+    libswresample-dev${suffix} \
     obs-studio
 
   local -a _qt_packages=()
