@@ -74,7 +74,9 @@ float4 over(float4 top, float4 bottom)
 	return float4(rgb, alpha);
 }
 
-float4 fill_at(float2 uv, sampler_state samp)
+/* Samplers cannot be passed to functions on OBS's OpenGL renderer (used on
+ * macOS and Linux), so the one sampler this needs is named directly. */
+float4 fill_at(float2 uv)
 {
 	if (fill_mode < 0.5)
 		return fill_color;
@@ -84,7 +86,7 @@ float4 fill_at(float2 uv, sampler_state samp)
 		return lerp(fill_color, fill_color2, t);
 	}
 
-	return image.Sample(samp, uv * uv_scale + uv_offset) * fill_color;
+	return image.Sample(clampSampler, uv * uv_scale + uv_offset) * fill_color;
 }
 
 float4 PSPanel(VertData v_in) : TARGET
@@ -106,7 +108,7 @@ float4 PSPanel(VertData v_in) : TARGET
 
 	float inner = clamp(0.5 - (dist + border_width) / feather, 0.0, 1.0);
 
-	float4 body = fill_at(uv, clampSampler);
+	float4 body = fill_at(uv);
 	body.a *= opacity * inner;
 
 	float4 edge = border_color;
