@@ -36,15 +36,46 @@ monitoring and track routing.
 A self-contained now-playing card: cover art, text and a progress bar in one source, with no
 browser source and no second application involved.
 
-The widget is a canvas you place elements on. Each one picks an anchor — one of the nine corners,
-edges or the centre — and is nudged from there in pixels, so resizing the card keeps a layout
-roughly where it was put. Every element has its own enable switch, layer order and opacity.
+Setting one up comes down to three choices:
+
+* **Layout.** Art on the left or right, stacked with the art on top, the art filling the card
+  behind the text, a compact bar, or text only. Positions and sizes are worked out from the
+  widget's size, so resizing the widget reflows the card instead of leaving elements where they
+  were.
+* **Style.** Glass (the cover art blurred behind everything), Solid, Minimal, Outline or Vinyl (a
+  spinning record). A style sets the panel, corners, art shape, type and colours for the whole
+  card, with one font, one text size, and an accent colour taken from the album art or fixed.
+* **Lines.** Up to four lines of template text on the main view, each with a role (title,
+  subtitle, detail or time) that decides its size and colour. Two more lines are available in
+  the advanced options.
+
+Everything else waits behind **Show advanced options**: spacing, art size and shape, corner
+radius, animations, and for each line and element the full set of options below. Any line can
+opt out of the style and be styled by hand, and the **Custom** style leaves every element's look
+to you.
+
+**Free placement** lets you put each element exactly where you want it. Each one picks an anchor
+(one of the nine corners, edges or the centre) and is offset from there in pixels, so a
+right-anchored element follows the right edge when the widget is resized.
+
+The **layout editor** (from the widget's properties, or **Tools → Music Widget Layout Editor**)
+shows the widget as OBS draws it. Drag any element to move it, or a corner or edge to resize it;
+elements snap to the widget's edges and centre lines and to each other (hold Alt to stop
+snapping), arrow keys nudge, and Undo steps back. Dragging an element under an automatic layout
+switches the widget to free placement, starting from where everything already is, so nothing
+jumps. Under a style, a line's type follows the height of its box, so making a line taller
+makes its text bigger.
+
+Widgets made before layouts and styles existed open on free placement and the Custom style, so
+they look exactly as they did.
+
+The elements the widget draws:
 
 * **Background panel.** A solid colour, a linear gradient, an image file, or the current cover
   art blurred, darkened and desaturated by however much you ask for. Corner radius, border, and
   an inset from the widget's edge.
-* **Album art.** Read from the track's own tags — ID3v2 `APIC`, the FLAC picture block, base64
-  `METADATA_BLOCK_PICTURE` in Ogg Vorbis and Opus, and the iTunes `covr` atom in MP4/M4A. When a
+* **Album art.** Read from the track's own tags: ID3v2 pictures in MP3, the FLAC picture block,
+  `METADATA_BLOCK_PICTURE` in Ogg Vorbis and Opus, and the `covr` atom in MP4/M4A. When a
   file carries none, a `cover`, `folder`, `front`, `album`, `albumart`, `artwork` or `thumb`
   image sitting in the same folder is used instead, and failing that a placeholder you choose.
   Fill the box and crop, fit inside it, or stretch; corner radius, border, drop shadow, a fixed
@@ -75,10 +106,6 @@ too, which it does not by default, a paused track still being the current track.
 last track on screen goes on using the playing templates for any line whose idle template is
 empty, since holding onto the last track is the point of it.
 
-A **Layout preset** dropdown and its Apply button write real values into all of the fields above
-— horizontal cards with art on either side, a vertical card, a wide banner, a compact bar, or
-text only — so a preset is a starting point rather than a mode, and everything stays adjustable
-afterwards.
 
 ### Music Progress Bar
 

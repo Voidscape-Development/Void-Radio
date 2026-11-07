@@ -196,7 +196,9 @@ jobs:
             libavcodec-dev \
             libavformat-dev \
             libavutil-dev \
-            libswresample-dev
+            libswresample-dev \
+            libobs-dev \
+            qt6-base-dev
 
       - name: Build and Run Tests 🧪
         run: |

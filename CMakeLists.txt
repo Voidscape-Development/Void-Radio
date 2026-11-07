@@ -117,6 +117,7 @@ if(ENABLE_QT)
       src/sources/music-widget-source.hpp
       src/sources/music-widget/art-loader.cpp
       src/sources/music-widget/art-loader.hpp
+      src/sources/music-widget/widget-defaults.cpp
       src/sources/music-widget/widget-design.cpp
       src/sources/music-widget/widget-design.hpp
       src/sources/music-widget/widget-draw.cpp
@@ -133,8 +134,19 @@ endif()
 # The Now Playing dock needs both Qt and the frontend API. Without them the
 # plugin still builds; it just has no dock.
 if(ENABLE_QT AND ENABLE_FRONTEND_API)
-  target_sources(${CMAKE_PROJECT_NAME} PRIVATE src/ui/now-playing-dock.cpp src/ui/now-playing-dock.hpp)
-  target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE VOID_RADIO_ENABLE_DOCK)
+  target_sources(
+    ${CMAKE_PROJECT_NAME}
+    PRIVATE
+      src/ui/editor-canvas.cpp
+      src/ui/editor-canvas.hpp
+      src/ui/editor-snap.cpp
+      src/ui/editor-snap.hpp
+      src/ui/now-playing-dock.cpp
+      src/ui/now-playing-dock.hpp
+      src/ui/widget-editor.cpp
+      src/ui/widget-editor.hpp
+  )
+  target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE VOID_RADIO_ENABLE_DOCK VOID_RADIO_ENABLE_EDITOR)
 endif()
 
 if(OS_WINDOWS)

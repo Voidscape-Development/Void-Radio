@@ -38,6 +38,33 @@ Everything that shows music - the Music Widget, the progress bar, the info filte
 reads the published `Snapshot` through `src/music/music-api.hpp`. None of them know how playback
 works, which is what made it possible to replace the engine without touching them.
 
+## The Music Widget
+
+The widget's settings come in two layers. What the user mostly touches is the design: a layout,
+a style, and up to six lines with roles. What the renderer reads is the detailed per-element
+settings it has always read: each element's position, size, font and colours.
+
+`resolve_settings()` in `src/sources/music-widget/widget-design.cpp` turns the first into the
+second. It copies the settings, runs the layout engine (`widget-layout.cpp`, pure arithmetic) to
+place the art, lines and bar for the widget's current size, and writes the chosen style's
+colours, fonts and shapes into each element. The renderer reads that copy exactly as if the user
+had set those values by hand, so it has no idea layouts or styles exist. Free placement and the
+Custom style skip the corresponding step, which is how widgets saved before this existed keep
+working unchanged; `migrate_settings()` puts them on both when they load.
+
+The layout editor (`src/ui/widget-editor.cpp`) works on the same layers:
+
+- `element_boxes()` resolves the settings and reports where each element is drawn, which is
+  what the editor outlines.
+- `detach_to_free_placement()` writes those resolved boxes into each element's own settings and
+  switches to free placement, so the first drag under an automatic layout moves nothing else.
+- `place_element()` stores a dragged box relative to the element's anchor.
+
+The editor's canvas (`editor-canvas.cpp`) knows nothing about OBS: it shows a picture and
+rectangles and reports drags in widget pixels. Snapping is plain arithmetic in `editor-snap.cpp`.
+The preview comes from a main render callback that draws the widget into a texture each frame
+and copies it back for the canvas.
+
 ## Threads, and who owns what
 
 The rule that keeps this simple: **every piece of mutable state has exactly one owning thread.**
@@ -49,6 +76,7 @@ Other threads hand it work or read a published copy; they never reach in.
 | Deck decode thread (one per `StreamDeck`) | its `AudioDecoder` | a small mutex-guarded buffer the engine reads from |
 | Library worker | folder walking, tag reading | posting `set_entries` / `set_tags` commands |
 | Art loader (widget) | cover decoding and blurring | a single request/result slot the widget polls |
+| Layout editor preview (OBS graphics thread) | its render target and staging surface | a mutex-guarded copy of the last frame the editor's timer picks up |
 | OBS UI / graphics / hotkey threads | nothing of ours | posting commands, reading snapshots |
 
 So when you add a transport feature, it goes in `Player` and is reached by posting a lambda from
@@ -69,7 +97,8 @@ So when you add a transport feature, it goes in `Player` and is reached by posti
 | `src/music/library-worker.*` | Folder scanning and tag reading off the engine thread. |
 | `src/music/music-api.*`, `music-link.cpp` | The public face other sources use: snapshot, entries, transport calls, and `MusicLink` for binding to a music source by name and UUID. |
 | `src/music/track-tags.*`, `album-art.*` | Tags and embedded/sidecar cover art via FFmpeg. |
-| `src/sources/music-widget-source.cpp`, `src/sources/music-widget/` | The Music Widget. `widget.hpp` lists its element types and the few functions its files share. |
+| `src/sources/music-widget-source.cpp`, `src/sources/music-widget/` | The Music Widget. `widget.hpp` lists its element types and the few functions its files share; `widget-layout` and `widget-design` are the layouts and styles described above. |
+| `src/ui/widget-editor.*`, `editor-canvas.*`, `editor-snap.*` | The drag-and-drop layout editor. |
 | `src/sources/progress-bar-source.cpp`, `src/render/bar-renderer.*` | The progress bar, also drawn inside the widget. |
 | `src/filters/music-info-filter.*` | Writes now-playing text into a text source. |
 | `src/ui/now-playing-dock.*` | The Qt dock. |
@@ -95,6 +124,10 @@ So when you add a transport feature, it goes in `Player` and is reached by posti
   the fallbacks.
 - **Anything the widget draws**: `src/sources/music-widget/`; `widget-render.cpp` for drawing,
   `widget-settings.cpp` and `widget-properties.cpp` for its options.
+- **A widget layout or style**: a new arrangement goes in `compute_layout()` with a case in
+  `tests/widget-layout-tests.cpp` (the sweep there checks it stays tidy at every size); a new
+  style is a `StyleTokens` entry in `widget-design.cpp`. Both need an entry in the properties
+  list and the editor's combo boxes.
 
 ## Things that are easy to get wrong
 
@@ -111,6 +144,10 @@ So when you add a transport feature, it goes in `Player` and is reached by posti
   its own seek must not jump.
 - **Cover art never reaches the decoder.** `AudioDecoder` discards every stream but the chosen
   audio one. OBS's own media source does not, which is what used to break seeking.
+- **The widget renders through OpenGL on macOS and Linux.** OBS translates effect files to GLSL
+  there, and some HLSL that Direct3D accepts does not survive the translation (passing a
+  `sampler_state` to a function, for one). Rendering the widget through libobs's OpenGL renderer
+  headless is how that was found; an effect change should get the same check.
 
 ## Tests
 
@@ -120,6 +157,10 @@ So when you add a transport feature, it goes in `Player` and is reached by posti
 | `decoder` | decoding, sample-exact seeks, the cover-art seek case, bad files | FFmpeg dev packages |
 | `tag` | tags in every container, cover art choice, sidecar art | FFmpeg dev packages |
 | `playlist`, `template` | play order; the now-playing template language | nothing |
+| `widget-layout` | every widget layout, and a sweep of sizes that checks nothing overlaps or spills | nothing |
+| `editor-snap` | the layout editor's snapping | nothing |
+| `editor-canvas` | the editor's canvas driven by simulated mouse and keyboard input | Qt 6 |
+| `widget-design` | layouts and styles resolving into element settings; switching to free placement moves nothing; placing an element lands it where asked; migration | libobs |
 | `obs-smoke` | the built plugin inside a real headless libobs | libobs, an X display |
 
 `README.md` has the commands. CI runs everything except `obs-smoke` on every push and pull
