@@ -39,8 +39,12 @@ constexpr int MAX_TAG_LOADS_PER_TICK = 6;
 /* How long a seek is given to land before the decoder's own reports are
  * trusted again, and how close a report has to be to the requested position to
  * count as the seek having landed. */
-constexpr uint64_t SEEK_SETTLE_MS = 750;
+constexpr uint64_t SEEK_SETTLE_MS = 1500;
 constexpr int64_t SEEK_LANDED_MS = 1500;
+
+/* A seek swaps in a fresh deck, which is faded up over this long so the jump
+ * does not click. */
+constexpr int SEEK_FADE_MS = 30;
 
 /* Audio buffered for a deck that is not currently driving the output. Two
  * seconds is far more than a crossfade needs and bounds the memory. */
@@ -1072,34 +1076,103 @@ void MusicSource::restart()
 }
 
 /*
- * Seeking is asynchronous inside the media source: the decoder finishes the
- * packet it is on, flushes, and only then reports the new position. During that
- * window it can report the old position, and can pass through a stopped state
- * on its way back to playing. Both have to be ignored here, or the poll below
- * either drags the position back to where the seek started or mistakes the
- * flush for the end of the track and skips to the next one.
+ * A deck that is already playing cannot be seeked reliably. OBS's media
+ * playback reads packets ahead of the decoder, and for a file carrying cover
+ * art (an attached picture, which counts as a video stream) it keeps reading
+ * until it reaches the end of the file within moments of starting, because the
+ * one-frame picture stream never has another frame ready. From then on it
+ * believes the file is exhausted. A seek flushes every packet it had buffered
+ * but leaves that end-of-file flag set, so the decoder finds nothing left,
+ * reports the media as ended, and playback moved on to the next track instead.
+ *
+ * Only reopening the media clears that flag, so a seek opens a fresh deck on
+ * the same track and seeks it before its decoder has read anything, then puts
+ * it in place of the old one. Streams are not seekable from the plugin's own
+ * controls and are left to the media source as before.
+ *
+ * Seeking is asynchronous either way: the new deck reports no position until
+ * it has decoded from the requested one, and can briefly report a stopped
+ * state while it opens. Both are ignored until the seek lands, or the poll
+ * below would drag the display back to zero or take the deck for finished.
  */
 void MusicSource::seek(int64_t ms)
 {
-	DeckPtr deck = current_deck();
-	if (!deck)
+	seek_internal(ms, false);
+}
+
+void MusicSource::seek_internal(int64_t ms, bool retry)
+{
+	DeckPtr old_deck = current_deck();
+	if (!old_deck)
 		return;
 
 	if (ms < 0)
 		ms = 0;
 
+	bool is_url = true;
+	PlayState transport;
+	bool fading_out;
+
 	{
 		std::lock_guard<std::mutex> lock(state_mutex_);
+
+		const PlaylistEntry *entry = playlist_.at(old_deck->entry_index);
+		if (entry)
+			is_url = entry->url;
+
+		transport = transport_;
+		fading_out = pending_stop_ns_ != 0;
+
 		last_media_ms_ = ms;
 		last_media_ns_ = os_gettime_ns();
 		seek_target_ms_ = ms;
 		seek_settle_ns_ = last_media_ns_ + SEEK_SETTLE_MS * 1000000ULL;
+		seek_retried_ = retry;
 		time_reset_ = false;
 	}
 
-	deck->finish_handled.store(false);
+	DeckPtr deck = is_url ? nullptr : create_deck(old_deck->entry_index);
 
+	if (!deck) {
+		old_deck->finish_handled.store(false);
+		obs_source_media_set_time(old_deck->media, ms);
+		return;
+	}
+
+	/* The new deck's media thread is still opening the file at this
+	 * point, so the seek is waiting for it before the first packet is
+	 * read rather than arriving after the read-ahead has hit the end. */
 	obs_source_media_set_time(deck->media, ms);
+
+	const bool silent = transport != PlayState::Playing || fading_out;
+
+	if (transport == PlayState::Paused)
+		obs_source_media_play_pause(deck->media, true);
+
+	deck->set_gain(0.0);
+
+	if (!silent) {
+		audio_t *obs_audio = obs_get_audio();
+		const size_t rate = obs_audio ? audio_output_get_sample_rate(obs_audio) : 48000;
+		deck->fade_to(1.0, ms_to_samples(SEEK_FADE_MS, rate), false);
+	}
+
+	std::vector<DeckPtr> dead;
+
+	{
+		std::lock_guard<std::mutex> lock(decks_mutex_);
+
+		dead.swap(decks_);
+		deck->driver.store(true);
+		decks_.push_back(deck);
+		current_ = deck;
+	}
+
+	for (DeckPtr &retired : dead)
+		destroy_deck(retired);
+
+	obs_source_add_audio_capture_callback(deck->media, audio_capture, deck.get());
+	deck->callback_added = true;
 }
 
 void MusicSource::play_index(int index)
@@ -1340,8 +1413,26 @@ void MusicSource::poll_playback()
 
 	/* A deck flushing a seek can report a stopped state on its way back to
 	 * playing, which must not be read as the track having ended. */
-	if (settling)
+	if (settling) {
+		/* The deck opened for the seek reached its end without ever
+		 * reporting the requested position, which means its decoder
+		 * got to the end of the file before the seek did. One more
+		 * fresh deck is tried before the end is believed. */
+		if (state == OBS_MEDIA_STATE_ENDED || state == OBS_MEDIA_STATE_ERROR) {
+			int64_t target = -1;
+
+			{
+				std::lock_guard<std::mutex> lock(state_mutex_);
+				if (!seek_retried_)
+					target = seek_target_ms_;
+			}
+
+			if (target >= 0)
+				seek_internal(target, true);
+		}
+
 		return;
+	}
 
 	/* A deck that never produced a sample counts as a failure; one that
 	 * played clears the counter. Without that, a playlist of unplayable
