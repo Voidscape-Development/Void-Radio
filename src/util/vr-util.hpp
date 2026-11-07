@@ -50,8 +50,4 @@ std::string file_extension(const std::string &path);
 /* True when the extension is one the media source can decode as audio. */
 bool is_supported_audio_file(const std::string &path);
 
-/* Latin-1 and UTF-16 to UTF-8 conversion, used by the tag readers. */
-std::string latin1_to_utf8(const uint8_t *data, size_t size);
-std::string utf16_to_utf8(const uint8_t *data, size_t size, bool big_endian);
-
 } // namespace vr

@@ -175,6 +175,38 @@ jobs:
           path: ${{ github.workspace }}/.ccache
           key: ${{ runner.os }}-ccache-${{ needs.check-event.outputs.config }}
 
+  unit-tests:
+    name: Unit Tests 🧪
+    runs-on: ubuntu-24.04
+    needs: check-event
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Dependencies 🛍️
+        run: |
+          : Install Dependencies 🛍️
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake \
+            ninja-build \
+            pkg-config \
+            libavcodec-dev \
+            libavformat-dev \
+            libavutil-dev \
+            libswresample-dev \
+            libobs-dev \
+            qt6-base-dev
+
+      - name: Build and Run Tests 🧪
+        run: |
+          : Build and Run Tests 🧪
+          cmake -S tests -B build_tests -G Ninja
+          cmake --build build_tests
+          ctest --test-dir build_tests --output-on-failure
+
   ubuntu-build:
     name: Build for Ubuntu 🐧
     strategy:

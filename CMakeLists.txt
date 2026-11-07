@@ -29,6 +29,11 @@ elseif(NOT OBS_SDK_VARIANT AND libobs_VERSION VERSION_GREATER_EQUAL 33)
   )
 endif()
 
+# FFmpeg decodes the music and reads its tags. OBS ships it on every platform;
+# see cmake/common/FindFFmpeg.cmake for where it comes from.
+find_package(FFmpeg REQUIRED COMPONENTS avformat avcodec avutil swresample)
+target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE FFmpeg::avformat FFmpeg::avcodec FFmpeg::avutil FFmpeg::swresample)
+
 if(ENABLE_FRONTEND_API)
   find_package(obs-frontend-api REQUIRED)
   target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE OBS::obs-frontend-api)
@@ -50,16 +55,39 @@ endif()
 target_sources(
   ${CMAKE_PROJECT_NAME}
   PRIVATE
+    src/audio/audio-decoder.cpp
+    src/audio/audio-decoder.hpp
+    src/audio/audio-format.hpp
+    src/audio/deck.hpp
+    src/audio/ffmpeg-util.cpp
+    src/audio/ffmpeg-util.hpp
+    src/audio/ring-buffer.cpp
+    src/audio/ring-buffer.hpp
+    src/audio/stream-deck.cpp
+    src/audio/stream-deck.hpp
     src/filters/music-info-filter.cpp
     src/filters/music-info-filter.hpp
     src/music/album-art.cpp
     src/music/album-art.hpp
+    src/music/command-queue.hpp
+    src/music/gain-envelope.cpp
+    src/music/gain-envelope.hpp
+    src/music/library-worker.cpp
+    src/music/library-worker.hpp
+    src/music/music-api.cpp
     src/music/music-api.hpp
+    src/music/music-link.cpp
+    src/music/music-source-info.cpp
+    src/music/music-source-settings.cpp
     src/music/music-source.cpp
     src/music/music-source.hpp
+    src/music/player.cpp
+    src/music/player.hpp
     src/music/playlist.cpp
     src/music/playlist.hpp
     src/music/snapshot.hpp
+    src/music/source-hotkeys.cpp
+    src/music/source-hotkeys.hpp
     src/music/track-tags.cpp
     src/music/track-tags.hpp
     src/plugin-main.cpp
@@ -87,6 +115,18 @@ if(ENABLE_QT)
       src/render/text-render.hpp
       src/sources/music-widget-source.cpp
       src/sources/music-widget-source.hpp
+      src/sources/music-widget/art-loader.cpp
+      src/sources/music-widget/art-loader.hpp
+      src/sources/music-widget/widget-defaults.cpp
+      src/sources/music-widget/widget-design.cpp
+      src/sources/music-widget/widget-design.hpp
+      src/sources/music-widget/widget-draw.cpp
+      src/sources/music-widget/widget-layout.cpp
+      src/sources/music-widget/widget-layout.hpp
+      src/sources/music-widget/widget-properties.cpp
+      src/sources/music-widget/widget-render.cpp
+      src/sources/music-widget/widget-settings.cpp
+      src/sources/music-widget/widget.hpp
   )
   target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE VOID_RADIO_ENABLE_WIDGET)
 endif()
@@ -94,8 +134,19 @@ endif()
 # The Now Playing dock needs both Qt and the frontend API. Without them the
 # plugin still builds; it just has no dock.
 if(ENABLE_QT AND ENABLE_FRONTEND_API)
-  target_sources(${CMAKE_PROJECT_NAME} PRIVATE src/ui/now-playing-dock.cpp src/ui/now-playing-dock.hpp)
-  target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE VOID_RADIO_ENABLE_DOCK)
+  target_sources(
+    ${CMAKE_PROJECT_NAME}
+    PRIVATE
+      src/ui/editor-canvas.cpp
+      src/ui/editor-canvas.hpp
+      src/ui/editor-snap.cpp
+      src/ui/editor-snap.hpp
+      src/ui/now-playing-dock.cpp
+      src/ui/now-playing-dock.hpp
+      src/ui/widget-editor.cpp
+      src/ui/widget-editor.hpp
+  )
+  target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE VOID_RADIO_ENABLE_DOCK VOID_RADIO_ENABLE_EDITOR)
 endif()
 
 if(OS_WINDOWS)
