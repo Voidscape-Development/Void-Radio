@@ -165,6 +165,7 @@ private:
 	static bool deck_finished(const Deck &deck);
 	DeckPtr current_deck();
 
+	void seek_internal(int64_t ms, bool retry);
 	void advance_track(int crossfade_ms, bool user_initiated);
 	void note_track_change(int entry_index);
 	int manual_crossfade_ms();
@@ -199,6 +200,10 @@ private:
 	 * and the deck is not allowed to count as finished. */
 	int64_t seek_target_ms_ = 0;
 	uint64_t seek_settle_ns_ = 0;
+
+	/* Whether the seek in progress is already a second attempt, made after
+	 * the deck opened for the first one ended without landing. */
+	bool seek_retried_ = false;
 
 	int pending_entry_ = -1;
 	uint64_t pending_start_ns_ = 0;

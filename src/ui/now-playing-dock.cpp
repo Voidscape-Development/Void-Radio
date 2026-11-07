@@ -32,7 +32,10 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include <QHBoxLayout>
 #include <QLineEdit>
 #include <QMenu>
+#include <QMouseEvent>
+#include <QSlider>
 #include <QStyle>
+#include <QStyleOptionSlider>
 #include <QVBoxLayout>
 
 namespace vr {
@@ -43,6 +46,42 @@ constexpr const char *DOCK_ID = "void_radio_now_playing";
 constexpr int REFRESH_INTERVAL_MS = 150;
 
 NowPlayingDock *dock_instance = nullptr;
+
+/* Clicking the track of a plain QSlider only nudges it a page towards the
+ * cursor, without the press and release that the dock seeks on, so the click
+ * did nothing and the next refresh put the handle back. This one jumps the
+ * handle to the click first, which then turns the click into an ordinary drag
+ * of the handle: pressed, moved, and seeked on release. */
+class SeekSlider : public QSlider {
+public:
+	using QSlider::QSlider;
+
+protected:
+	void mousePressEvent(QMouseEvent *event) override
+	{
+		if (event->button() == Qt::LeftButton && orientation() == Qt::Horizontal && maximum() > minimum()) {
+			QStyleOptionSlider opt;
+			initStyleOption(&opt);
+
+			const QRect handle =
+				style()->subControlRect(QStyle::CC_Slider, &opt, QStyle::SC_SliderHandle, this);
+			const QPoint pos = event->position().toPoint();
+
+			if (!handle.contains(pos)) {
+				const QRect groove =
+					style()->subControlRect(QStyle::CC_Slider, &opt, QStyle::SC_SliderGroove, this);
+				const int span = groove.width() - handle.width();
+				const int offset = pos.x() - groove.x() - handle.width() / 2;
+
+				if (span > 0)
+					setValue(QStyle::sliderValueFromPosition(minimum(), maximum(), offset, span,
+										 opt.upsideDown));
+			}
+		}
+
+		QSlider::mousePressEvent(event);
+	}
+};
 
 QString tr_text(const char *key)
 {
@@ -91,7 +130,7 @@ NowPlayingDock::NowPlayingDock(QWidget *parent) : QWidget(parent)
 	QHBoxLayout *seekLayout = new QHBoxLayout();
 	elapsedLabel_ = new QLabel(QStringLiteral("0:00"), this);
 	durationLabel_ = new QLabel(QStringLiteral("0:00"), this);
-	seekSlider_ = new QSlider(Qt::Horizontal, this);
+	seekSlider_ = new SeekSlider(Qt::Horizontal, this);
 	seekSlider_->setRange(0, 1000);
 	seekSlider_->setEnabled(false);
 
