@@ -103,6 +103,14 @@ bool AudioDecoder::open(const std::string &path, bool is_url, const AudioFormat 
 	if (!format_)
 		return fail("could not open: " + open_error);
 
+	/* Cover art and any video are dropped at the demuxer before anything is
+	 * probed, so they are never decoded and can never be what decides that
+	 * the file has ended. */
+	for (unsigned i = 0; i < format_->nb_streams; i++) {
+		if (format_->streams[i]->codecpar->codec_type != AVMEDIA_TYPE_AUDIO)
+			format_->streams[i]->discard = AVDISCARD_ALL;
+	}
+
 	int ret = avformat_find_stream_info(format_.get(), nullptr);
 	if (ret < 0)
 		return fail("could not read stream info: " + av_error_string(ret));
@@ -112,8 +120,7 @@ bool AudioDecoder::open(const std::string &path, bool is_url, const AudioFormat 
 	if (stream_index_ < 0 || !codec)
 		return fail("no audio stream");
 
-	/* Cover art and any video are dropped at the demuxer. They are never
-	 * decoded, and can never be what decides that the file has ended. */
+	/* Only the chosen stream is read; a second audio track is dropped too. */
 	for (unsigned i = 0; i < format_->nb_streams; i++) {
 		if ((int)i != stream_index_)
 			format_->streams[i]->discard = AVDISCARD_ALL;

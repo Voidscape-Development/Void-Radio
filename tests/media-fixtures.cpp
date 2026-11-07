@@ -4,6 +4,7 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libavutil/channel_layout.h>
+#include <libavutil/pixfmt.h>
 }
 
 #include <cmath>
@@ -13,12 +14,6 @@ extern "C" {
 namespace fixture {
 
 namespace {
-
-const unsigned char PNG_1X1[] = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48,
-				 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00,
-				 0x00, 0x90, 0x77, 0x53, 0xDE, 0x00, 0x00, 0x00, 0x0C, 0x49, 0x44, 0x41, 0x54, 0x08,
-				 0xD7, 0x63, 0xF8, 0xCF, 0xC0, 0x00, 0x00, 0x03, 0x01, 0x01, 0x00, 0x18, 0xDD, 0x8D,
-				 0xB0, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82};
 
 bool fail(std::string *error, const std::string &what, int code = 0)
 {
@@ -115,10 +110,38 @@ bool encode(AVFormatContext *oc, AVCodecContext *ctx, AVStream *st, AVFrame *fra
 
 std::vector<unsigned char> picture_bytes(size_t index)
 {
-	std::vector<unsigned char> bytes(PNG_1X1, PNG_1X1 + sizeof(PNG_1X1));
-	/* Rewrite a byte of the image data; the CRC goes stale, which nothing
-	 * here checks. */
-	bytes[45] = (unsigned char)(0xC0 + index);
+	/* A real 1x1 PNG whose one pixel's red channel is the index, encoded by
+	 * FFmpeg so that it is valid down to the checksums. */
+	std::vector<unsigned char> bytes;
+
+	const AVCodec *codec = avcodec_find_encoder(AV_CODEC_ID_PNG);
+	AVCodecContext *ctx = codec ? avcodec_alloc_context3(codec) : nullptr;
+	AVFrame *frame = av_frame_alloc();
+	AVPacket *pkt = av_packet_alloc();
+
+	if (ctx && frame && pkt) {
+		ctx->width = 1;
+		ctx->height = 1;
+		ctx->pix_fmt = AV_PIX_FMT_RGB24;
+		ctx->time_base = AVRational{1, 25};
+
+		frame->width = 1;
+		frame->height = 1;
+		frame->format = AV_PIX_FMT_RGB24;
+
+		if (avcodec_open2(ctx, codec, nullptr) >= 0 && av_frame_get_buffer(frame, 0) >= 0) {
+			frame->data[0][0] = (uint8_t)index;
+			frame->data[0][1] = 0x40;
+			frame->data[0][2] = 0x80;
+
+			if (avcodec_send_frame(ctx, frame) >= 0 && avcodec_receive_packet(ctx, pkt) >= 0)
+				bytes.assign(pkt->data, pkt->data + pkt->size);
+		}
+	}
+
+	av_packet_free(&pkt);
+	av_frame_free(&frame);
+	avcodec_free_context(&ctx);
 	return bytes;
 }
 

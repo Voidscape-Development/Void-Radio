@@ -41,8 +41,33 @@ target_link_libraries(void-radio-testable PUBLIC PkgConfig::FFMPEG Threads::Thre
 add_library(media-fixtures STATIC media-fixtures.cpp)
 target_link_libraries(media-fixtures PUBLIC PkgConfig::FFMPEG)
 
-foreach(test_name IN ITEMS tag playlist template player decoder)
+foreach(
+  test_name
+  IN
+  ITEMS tag playlist template player decoder
+)
   add_executable(${test_name}-tests "${test_name}-tests.cpp")
   target_link_libraries(${test_name}-tests PRIVATE void-radio-testable media-fixtures)
   add_test(NAME ${test_name} COMMAND ${test_name}-tests)
 endforeach()
+
+# The headless libobs smoke test: built when libobs can be found, and run
+# against the plugin named by VOID_RADIO_PLUGIN. See obs-smoke-test.cpp.
+find_package(libobs QUIET)
+
+if(TARGET OBS::libobs)
+  add_executable(obs-smoke-test obs-smoke-test.cpp)
+  target_link_libraries(obs-smoke-test PRIVATE media-fixtures OBS::libobs)
+  target_include_directories(obs-smoke-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+
+  set(VOID_RADIO_PLUGIN "" CACHE FILEPATH "Built plugin module for the libobs smoke test")
+
+  if(VOID_RADIO_PLUGIN)
+    add_test(NAME obs-smoke COMMAND obs-smoke-test)
+    set_tests_properties(
+      obs-smoke
+      PROPERTIES
+        ENVIRONMENT "VOID_RADIO_PLUGIN=${VOID_RADIO_PLUGIN};VOID_RADIO_DATA=${CMAKE_CURRENT_SOURCE_DIR}/../data"
+    )
+  endif()
+endif()

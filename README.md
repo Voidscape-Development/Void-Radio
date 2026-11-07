@@ -15,7 +15,9 @@ built around music playback.
 * Shuffle, repeat all, repeat one, or stop at the end of the list.
 * Crossfade between tracks, or a plain silent gap when crossfade is off. Crossfading applies to
   natural track ends and to manual skips alike, and is clamped so a short track cannot be
-  swallowed by the fade.
+  swallowed by the fade. With both off, tracks run straight into each other with no gap at all.
+* Seeking lands on the exact position asked for, from the dock, OBS's media controls or
+  anything else that drives the source.
 * Independent fade in and fade out for starting, pausing and stopping.
 * Song titles and artists are read from the file's own tags. Anything missing can be filled in
   by hand per track from the dock, and those edits are saved with the scene collection.
@@ -25,9 +27,9 @@ built around music playback.
 * Global hotkeys for play/pause, stop, next, previous and restart.
 * Appears in OBS's own media controls, so the built-in transport buttons work too.
 
-Audio is decoded by private OBS media sources and mixed back out through the Music Source
-itself, so the music arrives in the audio mixer as a single channel with working volume,
-filters, monitoring and track routing.
+Audio is decoded with FFmpeg (the copy OBS already ships) and mixed inside the Music Source,
+so the music arrives in the audio mixer as a single channel with working volume, filters,
+monitoring and track routing.
 
 ### Music Widget
 
@@ -156,12 +158,20 @@ details.
 |---|---|
 | Windows | Visual Studio 17 2022, CMake 3.30.5 |
 | macOS | Xcode 16.0, CMake 3.30.5 |
-| Ubuntu 24.04 | CMake 3.28.3, `ninja-build`, `pkg-config`, `build-essential` |
+| Ubuntu 24.04 | CMake 3.28.3, `ninja-build`, `pkg-config`, `build-essential`, FFmpeg development packages |
 
 ```sh
 cmake --preset ubuntu-x86_64   # or windows-x64 / macos
 cmake --build --preset ubuntu-x86_64
 ```
+
+The plugin links FFmpeg (`avformat`, `avcodec`, `avutil`, `swresample`) to decode audio and read
+tags. On Windows and macOS it comes with the OBS dependencies the build already downloads; on
+Ubuntu install `libavcodec-dev libavformat-dev libavutil-dev libswresample-dev`. Either way it is
+the same FFmpeg OBS itself runs on, so nothing extra ships with the plugin.
+
+How the code is laid out, which thread owns what, and where to make a given change is described
+in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ### Building for OBS Studio 33+
 
@@ -186,8 +196,10 @@ source and no dock.
 
 ## Tests
 
-The parts that do not need OBS — the tag readers, the template expander and playlist navigation
-— build and run on their own:
+Everything that does not need OBS builds and runs on its own: the playback engine's transport
+logic (against fake decks), the decoder and its seeking (against real files the tests write with
+FFmpeg), tag and cover art reading, the template expander and playlist navigation. They need the
+FFmpeg development packages and run in CI on every push and pull request.
 
 ```sh
 cmake -S tests -B build_tests
@@ -195,15 +207,25 @@ cmake --build build_tests
 ctest --test-dir build_tests --output-on-failure
 ```
 
+On Linux there is also a smoke test that loads the built plugin into a real, headless libobs and
+plays a playlist through it. It is built when libobs is installed and runs when pointed at the
+plugin; it needs an X display, so run it under `xvfb-run`:
+
+```sh
+cmake -S tests -B build_tests -DVOID_RADIO_PLUGIN=$PWD/build_x86_64/void-radio.so
+cmake --build build_tests
+xvfb-run -a ctest --test-dir build_tests --output-on-failure
+```
+
 ## Notes
 
-* Tags are read without a third-party tagging library: ID3v2.2/2.3/2.4 and ID3v1, Vorbis
-  comments in FLAC and Ogg (Vorbis, Opus), iTunes-style metadata in MP4/M4A, and RIFF INFO in
-  WAV. Anything unreadable falls back to the file name, and can be overridden by hand.
-* Cover art is read the same way, and decoded off the graphics thread so a large JPEG cannot
-  stutter the render. WAV has no standard picture chunk, so those tracks rely on a sidecar image
-  or the placeholder.
-* Decoding itself is whatever the OBS media source supports, which is far wider than that list.
+* Tags and cover art are read with FFmpeg: ID3v2 and ID3v1 in MP3, Vorbis comments in FLAC and
+  Ogg (Vorbis, Opus), iTunes-style metadata in MP4/M4A, RIFF INFO in WAV, and whatever else
+  FFmpeg can open. Anything unreadable falls back to the file name, and can be overridden by
+  hand.
+* Cover art is decoded off the graphics thread so a large JPEG cannot stutter the render. WAV has
+  no standard picture chunk, so those tracks rely on a sidecar image or the placeholder.
+* Anything FFmpeg can decode plays, which is far wider than that list.
 
 ## License
 

@@ -11,6 +11,7 @@
 #include "media-fixtures.hpp"
 #include "test-check.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <thread>
@@ -93,7 +94,8 @@ int64_t read_for(vr::StreamDeck &deck, int64_t ms, std::vector<float> *left = nu
 		if (state == vr::Deck::State::Ended || state == vr::Deck::State::Failed)
 			break;
 
-		const size_t got = deck.read(out, 480);
+		const int64_t want = (int64_t)vr::ms_to_frames(ms, RATE) - got_total;
+		const size_t got = deck.read(out, (size_t)std::min<int64_t>(480, want));
 		if (left)
 			left->insert(left->end(), a, a + got);
 		got_total += (int64_t)got;

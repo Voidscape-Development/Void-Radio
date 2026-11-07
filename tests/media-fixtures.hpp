@@ -40,8 +40,8 @@ bool supported(const Spec &spec);
 
 bool write(const std::string &path, const Spec &spec, std::string *error = nullptr);
 
-/* The bytes written for picture number `index`: a 1x1 PNG whose colour byte
- * is the index, so tests can tell which picture they got back. */
+/* The bytes written for picture number `index`: a 1x1 PNG whose pixel
+ * encodes the index, so tests can tell which picture they got back. */
 std::vector<unsigned char> picture_bytes(size_t index);
 
 /* Decoded sample value -> position in the sawtooth. */

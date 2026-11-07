@@ -32,10 +32,7 @@ endif()
 # FFmpeg decodes the music and reads its tags. OBS ships it on every platform;
 # see cmake/common/FindFFmpeg.cmake for where it comes from.
 find_package(FFmpeg REQUIRED COMPONENTS avformat avcodec avutil swresample)
-target_link_libraries(
-  ${CMAKE_PROJECT_NAME}
-  PRIVATE FFmpeg::avformat FFmpeg::avcodec FFmpeg::avutil FFmpeg::swresample
-)
+target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE FFmpeg::avformat FFmpeg::avcodec FFmpeg::avutil FFmpeg::swresample)
 
 if(ENABLE_FRONTEND_API)
   find_package(obs-frontend-api REQUIRED)
