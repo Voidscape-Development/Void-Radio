@@ -118,6 +118,13 @@ if(ENABLE_QT)
       src/render/text-render.hpp
       src/sources/music-widget-source.cpp
       src/sources/music-widget-source.hpp
+      src/sources/music-widget/art-loader.cpp
+      src/sources/music-widget/art-loader.hpp
+      src/sources/music-widget/widget-draw.cpp
+      src/sources/music-widget/widget-properties.cpp
+      src/sources/music-widget/widget-render.cpp
+      src/sources/music-widget/widget-settings.cpp
+      src/sources/music-widget/widget.hpp
   )
   target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE VOID_RADIO_ENABLE_WIDGET)
 endif()
