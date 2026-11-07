@@ -25,6 +25,7 @@ add_library(
   "${VOID_RADIO_SRC}/audio/ffmpeg-util.cpp"
   "${VOID_RADIO_SRC}/audio/ring-buffer.cpp"
   "${VOID_RADIO_SRC}/audio/stream-deck.cpp"
+  "${VOID_RADIO_SRC}/music/album-art.cpp"
   "${VOID_RADIO_SRC}/music/gain-envelope.cpp"
   "${VOID_RADIO_SRC}/music/player.cpp"
   "${VOID_RADIO_SRC}/music/playlist.cpp"

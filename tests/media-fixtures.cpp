@@ -113,10 +113,13 @@ bool encode(AVFormatContext *oc, AVCodecContext *ctx, AVStream *st, AVFrame *fra
 
 } // namespace
 
-const unsigned char *cover_bytes(size_t &size)
+std::vector<unsigned char> picture_bytes(size_t index)
 {
-	size = sizeof(PNG_1X1);
-	return PNG_1X1;
+	std::vector<unsigned char> bytes(PNG_1X1, PNG_1X1 + sizeof(PNG_1X1));
+	/* Rewrite a byte of the image data; the CRC goes stale, which nothing
+	 * here checks. */
+	bytes[45] = (unsigned char)(0xC0 + index);
+	return bytes;
 }
 
 int saw_position(float sample)
@@ -185,16 +188,17 @@ bool write(const std::string &path, const Spec &spec, std::string *error)
 			av_dict_set(&st->metadata, item.first.c_str(), item.second.c_str(), 0);
 		}
 
-		AVStream *pic = nullptr;
-		if (spec.cover) {
-			pic = avformat_new_stream(oc, nullptr);
+		std::vector<AVStream *> pics;
+		for (const std::string &comment : spec.pictures) {
+			AVStream *pic = avformat_new_stream(oc, nullptr);
 			pic->disposition = AV_DISPOSITION_ATTACHED_PIC;
 			pic->codecpar->codec_type = AVMEDIA_TYPE_VIDEO;
 			pic->codecpar->codec_id = AV_CODEC_ID_PNG;
 			pic->codecpar->width = 1;
 			pic->codecpar->height = 1;
 			pic->time_base = AVRational{1, 90000};
-			av_dict_set(&pic->metadata, "comment", spec.cover_comment.c_str(), 0);
+			av_dict_set(&pic->metadata, "comment", comment.c_str(), 0);
+			pics.push_back(pic);
 		}
 
 		if (!(oc->oformat->flags & AVFMT_NOFILE)) {
@@ -205,25 +209,32 @@ bool write(const std::string &path, const Spec &spec, std::string *error)
 			}
 		}
 
-		ret = avformat_write_header(oc, nullptr);
+		AVDictionary *options = nullptr;
+		for (const auto &item : spec.muxer_options)
+			av_dict_set(&options, item.first.c_str(), item.second.c_str(), 0);
+
+		ret = avformat_write_header(oc, &options);
+		av_dict_free(&options);
 		if (ret < 0) {
 			fail(error, "write header", ret);
 			break;
 		}
 
-		if (pic) {
+		bool pictures_ok = true;
+		for (size_t i = 0; i < pics.size() && pictures_ok; i++) {
+			const std::vector<unsigned char> bytes = picture_bytes(i);
 			AVPacket *art = av_packet_alloc();
-			av_new_packet(art, (int)sizeof(PNG_1X1));
-			memcpy(art->data, PNG_1X1, sizeof(PNG_1X1));
-			art->stream_index = pic->index;
+			av_new_packet(art, (int)bytes.size());
+			memcpy(art->data, bytes.data(), bytes.size());
+			art->stream_index = pics[i]->index;
 			art->flags |= AV_PKT_FLAG_KEY;
 			ret = av_interleaved_write_frame(oc, art);
 			av_packet_free(&art);
-			if (ret < 0) {
-				fail(error, "write cover", ret);
-				break;
-			}
+			if (ret < 0)
+				pictures_ok = fail(error, "write picture", ret);
 		}
+		if (!pictures_ok)
+			break;
 
 		frame = av_frame_alloc();
 		frame->format = ctx->sample_fmt;

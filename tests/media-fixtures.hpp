@@ -13,6 +13,7 @@
 
 #include <map>
 #include <string>
+#include <vector>
 
 namespace fixture {
 
@@ -26,8 +27,11 @@ struct Spec {
 	int channels = 2;
 	int duration_ms = 2000;
 	std::map<std::string, std::string> metadata;
-	bool cover = false;
-	std::string cover_comment = "Cover (front)";
+	std::map<std::string, std::string> muxer_options;
+
+	/* One embedded PNG per entry, each labelled with its picture type
+	 * the way FFmpeg names them ("Cover (front)", "Cover (back)"...). */
+	std::vector<std::string> pictures;
 };
 
 /* Whether this FFmpeg build can write the spec at all (encoders such as
@@ -36,8 +40,9 @@ bool supported(const Spec &spec);
 
 bool write(const std::string &path, const Spec &spec, std::string *error = nullptr);
 
-/* The bytes written as cover art: a 1x1 PNG. */
-const unsigned char *cover_bytes(size_t &size);
+/* The bytes written for picture number `index`: a 1x1 PNG whose colour byte
+ * is the index, so tests can tell which picture they got back. */
+std::vector<unsigned char> picture_bytes(size_t index);
 
 /* Decoded sample value -> position in the sawtooth. */
 int saw_position(float sample);

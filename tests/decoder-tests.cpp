@@ -120,7 +120,7 @@ int main()
 	fixture::Spec flac;
 	flac.format = "flac";
 	flac.codec = "flac";
-	flac.cover = true;
+	flac.pictures = {"Cover (front)"};
 	const std::string flac_path = make("cover.flac", flac);
 
 	/* Whole file, sample exact, cover art ignored. */
@@ -224,7 +224,7 @@ int main()
 	fixture::Spec mp3;
 	mp3.format = "mp3";
 	mp3.codec = "libmp3lame";
-	mp3.cover = true;
+	mp3.pictures = {"Cover (front)"};
 	if (fixture::supported(mp3)) {
 		const std::string path = make("cover.mp3", mp3);
 		seek_regression("mp3 with cover", path, false);

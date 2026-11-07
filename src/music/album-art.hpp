@@ -39,18 +39,12 @@ struct AlbumArtData {
 };
 
 /*
- * Reads embedded cover art without a tagging library. Supported: ID3v2 APIC
- * (and the ID3v2.2 "PIC" spelling) as used by MP3, the FLAC PICTURE metadata
- * block, base64 METADATA_BLOCK_PICTURE and COVERART entries in Vorbis comments
- * (FLAC, Ogg Vorbis, Opus), and the iTunes "covr" atom in MP4/M4A. WAV has no
- * standard picture chunk and is not handled.
+ * Reads embedded cover art with FFmpeg: ID3v2 pictures in MP3, FLAC PICTURE
+ * blocks, METADATA_BLOCK_PICTURE in Ogg Vorbis and Opus, and the MP4 "covr"
+ * atom. WAV has no standard picture chunk.
  *
  * A front cover is preferred when a file carries several pictures; otherwise
- * the first usable one wins. Returns false when nothing was found, and never
- * throws.
- *
- * Unlike read_tags this walks the file with seeks rather than a bulk header
- * read, because artwork routinely runs to several megabytes.
+ * the first one wins. Returns false when nothing was found, and never throws.
  */
 bool read_embedded_art(const std::string &path, AlbumArtData &out);
 

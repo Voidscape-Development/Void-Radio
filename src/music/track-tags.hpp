@@ -38,13 +38,14 @@ struct Tags {
 };
 
 /*
- * Reads embedded metadata from a media file without pulling in a tagging
- * library. Supported containers: ID3v2 (2.2/2.3/2.4) and ID3v1 as used by MP3,
- * Vorbis comments in FLAC and Ogg (Vorbis/Opus/FLAC), iTunes-style metadata in
- * MP4/M4A, and RIFF INFO chunks in WAV.
+ * Reads a file's embedded metadata with FFmpeg, which covers ID3v2 and ID3v1 in
+ * MP3, Vorbis comments in FLAC, Ogg Vorbis and Opus, iTunes metadata in MP4 and
+ * M4A, RIFF INFO in WAV, and anything else FFmpeg can open. Only the container
+ * header is read.
  *
- * Returns true when at least one field could be filled in. Never throws, and
- * always leaves `out` in a usable state.
+ * The year is cut down to its first four digits and the track number to the
+ * part before any "/total". Returns true when at least one field could be
+ * filled in. Never throws, and always leaves `out` in a usable state.
  */
 bool read_tags(const std::string &path, Tags &out);
 

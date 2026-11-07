@@ -1,12 +1,21 @@
 /*
- * Implementations of the stubbed platform helpers. File access maps onto the
- * C library; directory scanning is stubbed out because the tests exercise
- * playlist ordering rather than the folder walk.
+ * Implementations of the stubbed platform helpers on top of POSIX, so the
+ * parts of the plugin under test can touch real files and folders.
  */
 
 #include <util/platform.h>
 
+#include <dirent.h>
 #include <sys/stat.h>
+
+#include <cstring>
+#include <string>
+
+struct os_dir {
+	DIR *dir;
+	std::string path;
+	struct os_dirent entry;
+};
 
 extern "C" {
 
@@ -34,18 +43,41 @@ bool os_file_exists(const char *path)
 
 os_dir_t *os_opendir(const char *path)
 {
-	(void)path;
-	return nullptr;
+	DIR *dir = opendir(path);
+	if (!dir)
+		return nullptr;
+
+	os_dir_t *handle = new os_dir_t();
+	handle->dir = dir;
+	handle->path = path;
+	return handle;
 }
 
 struct os_dirent *os_readdir(os_dir_t *dir)
 {
-	(void)dir;
-	return nullptr;
+	if (!dir)
+		return nullptr;
+
+	struct dirent *entry = readdir(dir->dir);
+	if (!entry)
+		return nullptr;
+
+	strncpy(dir->entry.d_name, entry->d_name, sizeof(dir->entry.d_name) - 1);
+	dir->entry.d_name[sizeof(dir->entry.d_name) - 1] = 0;
+
+	struct stat info;
+	const std::string full = dir->path + "/" + entry->d_name;
+	dir->entry.directory = stat(full.c_str(), &info) == 0 && S_ISDIR(info.st_mode);
+
+	return &dir->entry;
 }
 
 void os_closedir(os_dir_t *dir)
 {
-	(void)dir;
+	if (!dir)
+		return;
+
+	closedir(dir->dir);
+	delete dir;
 }
 }

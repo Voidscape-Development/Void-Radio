@@ -1,453 +1,234 @@
+/*
+ * Tests for read_tags, read_embedded_art and find_sidecar_art, run against
+ * real files written by FFmpeg's own muxers in each container the plugin is
+ * expected to handle.
+ */
+
+#include "media-fixtures.hpp"
+#include "music/album-art.hpp"
 #include "music/track-tags.hpp"
-#include <cstdint>
+#include "test-check.hpp"
+
 #include <cstdio>
 #include <cstring>
-#include <string>
-#include <vector>
+#include <fstream>
+#include <sys/stat.h>
+#include <unistd.h>
 
-static int failures = 0;
+using test::check_str;
+using test::check_true;
 
-static void check(const char *what, const std::string &got, const std::string &want)
+namespace {
+
+const std::map<std::string, std::string> FULL_TAGS = {
+	{"title", "Neon Drift"}, {"artist", "Voidscape"}, {"album", "After Hours"},
+	{"date", "2024-05-01"},  {"track", "03/12"},      {"genre", "Electronic"},
+};
+
+/* Writes `spec` with the full tag set and checks every field comes back. */
+void check_container(const char *label, fixture::Spec spec)
 {
-	if (got != want) {
-		printf("FAIL %-28s got '%s' want '%s'\n", what, got.c_str(), want.c_str());
-		failures++;
-	} else {
-		printf("ok   %-28s '%s'\n", what, got.c_str());
+	if (!fixture::supported(spec)) {
+		printf("skip %s (encoder or muxer not in this FFmpeg)\n", label);
+		return;
 	}
-}
 
-static void write_file(const char *path, const std::vector<uint8_t> &data)
-{
-	FILE *f = fopen(path, "wb");
-	fwrite(data.data(), 1, data.size(), f);
-	fclose(f);
-}
+	spec.metadata = FULL_TAGS;
+	spec.duration_ms = 200;
 
-static void put(std::vector<uint8_t> &v, const char *s, size_t n)
-{
-	v.insert(v.end(), s, s + n);
-}
-static void put_be32(std::vector<uint8_t> &v, uint32_t x)
-{
-	v.push_back(x >> 24);
-	v.push_back(x >> 16);
-	v.push_back(x >> 8);
-	v.push_back(x);
-}
-static void put_le32(std::vector<uint8_t> &v, uint32_t x)
-{
-	v.push_back(x);
-	v.push_back(x >> 8);
-	v.push_back(x >> 16);
-	v.push_back(x >> 24);
-}
-static void put_syncsafe(std::vector<uint8_t> &v, uint32_t x)
-{
-	v.push_back((x >> 21) & 0x7F);
-	v.push_back((x >> 14) & 0x7F);
-	v.push_back((x >> 7) & 0x7F);
-	v.push_back(x & 0x7F);
-}
-
-/* --- ID3v2.3 --------------------------------------------------------- */
-static void test_id3v23()
-{
-	std::vector<uint8_t> frames;
-	auto frame = [&](const char *id, uint8_t enc, const std::string &text) {
-		std::vector<uint8_t> body;
-		body.push_back(enc);
-		body.insert(body.end(), text.begin(), text.end());
-		put(frames, id, 4);
-		put_be32(frames, (uint32_t)body.size());
-		frames.push_back(0);
-		frames.push_back(0);
-		frames.insert(frames.end(), body.begin(), body.end());
-	};
-
-	frame("TIT2", 3, "Neon Drift");
-	frame("TPE1", 3, "Voidscape");
-	frame("TALB", 3, "After Hours");
-	frame("TYER", 0, "2024");
-	frame("TRCK", 0, "3/12");
-	frame("TCON", 0, "(52)");
-
-	std::vector<uint8_t> file;
-	put(file, "ID3", 3);
-	file.push_back(3);
-	file.push_back(0);
-	file.push_back(0);
-	put_syncsafe(file, (uint32_t)frames.size());
-	file.insert(file.end(), frames.begin(), frames.end());
-	file.resize(file.size() + 64, 0);
-
-	write_file("/tmp/vr-test-id3v23.mp3", file);
-
-	vr::Tags tags;
-	vr::read_tags("/tmp/vr-test-id3v23.mp3", tags);
-	check("id3v2.3 title", tags.title, "Neon Drift");
-	check("id3v2.3 artist", tags.artist, "Voidscape");
-	check("id3v2.3 album", tags.album, "After Hours");
-	check("id3v2.3 year", tags.year, "2024");
-	check("id3v2.3 track", tags.track, "3");
-	check("id3v2.3 genre", tags.genre, "Electronic");
-}
-
-/* --- ID3v2.4 with UTF-16 --------------------------------------------- */
-static void test_id3v24_utf16()
-{
-	std::vector<uint8_t> frames;
-	std::vector<uint8_t> body;
-	body.push_back(1);
-	body.push_back(0xFF);
-	body.push_back(0xFE);
-	const char16_t text[] = u"Ünïcode Søñg";
-	for (size_t i = 0; text[i]; i++) {
-		body.push_back(text[i] & 0xFF);
-		body.push_back(text[i] >> 8);
+	const std::string path = fixture::temp_path(std::string(label) + "." + spec.format);
+	std::string error;
+	if (!fixture::write(path, spec, &error)) {
+		printf("FAIL %s: could not write fixture: %s\n", label, error.c_str());
+		test::failures++;
+		return;
 	}
-	put(frames, "TIT2", 4);
-	put_syncsafe(frames, (uint32_t)body.size());
-	frames.push_back(0);
-	frames.push_back(0);
-	frames.insert(frames.end(), body.begin(), body.end());
-
-	std::vector<uint8_t> file;
-	put(file, "ID3", 3);
-	file.push_back(4);
-	file.push_back(0);
-	file.push_back(0);
-	put_syncsafe(file, (uint32_t)frames.size());
-	file.insert(file.end(), frames.begin(), frames.end());
-
-	write_file("/tmp/vr-test-id3v24.mp3", file);
 
 	vr::Tags tags;
-	vr::read_tags("/tmp/vr-test-id3v24.mp3", tags);
-	check("id3v2.4 utf16 title", tags.title, "Ünïcode Søñg");
+	const bool found = vr::read_tags(path, tags);
+	const std::string prefix = std::string(label) + " ";
+
+	check_true((prefix + "found").c_str(), found);
+	check_str((prefix + "title").c_str(), tags.title, "Neon Drift");
+	check_str((prefix + "artist").c_str(), tags.artist, "Voidscape");
+	check_str((prefix + "album").c_str(), tags.album, "After Hours");
+	check_str((prefix + "year").c_str(), tags.year, "2024");
+	check_str((prefix + "track").c_str(), tags.track, "3");
+	check_str((prefix + "genre").c_str(), tags.genre, "Electronic");
+
+	remove(path.c_str());
 }
 
-/* --- ID3v1 fallback --------------------------------------------------- */
-static void test_id3v1()
+/* Writes `spec` with the given pictures and checks which one is read back. */
+void check_art(const char *label, fixture::Spec spec, size_t want_index)
 {
-	std::vector<uint8_t> file(4096, 0);
-	std::vector<uint8_t> tag(128, 0);
-	memcpy(&tag[0], "TAG", 3);
-	memcpy(&tag[3], "Old School", 10);
-	memcpy(&tag[33], "Tape Deck", 9);
-	memcpy(&tag[93], "1998", 4);
-	tag[125] = 0;
-	tag[126] = 7;
-	tag[127] = 17; /* Rock */
-	file.insert(file.end(), tag.begin(), tag.end());
-
-	write_file("/tmp/vr-test-id3v1.mp3", file);
-
-	vr::Tags tags;
-	vr::read_tags("/tmp/vr-test-id3v1.mp3", tags);
-	check("id3v1 title", tags.title, "Old School");
-	check("id3v1 artist", tags.artist, "Tape Deck");
-	check("id3v1 year", tags.year, "1998");
-	check("id3v1 track", tags.track, "7");
-	check("id3v1 genre", tags.genre, "Rock");
-}
-
-/* --- FLAC ------------------------------------------------------------- */
-static std::vector<uint8_t> vorbis_comment_block(const std::vector<std::string> &comments)
-{
-	std::vector<uint8_t> block;
-	const std::string vendor = "void-radio-test";
-	put_le32(block, (uint32_t)vendor.size());
-	block.insert(block.end(), vendor.begin(), vendor.end());
-	put_le32(block, (uint32_t)comments.size());
-	for (const std::string &c : comments) {
-		put_le32(block, (uint32_t)c.size());
-		block.insert(block.end(), c.begin(), c.end());
+	if (!fixture::supported(spec)) {
+		printf("skip %s (encoder or muxer not in this FFmpeg)\n", label);
+		return;
 	}
-	return block;
-}
 
-static void test_flac()
-{
-	std::vector<uint8_t> comment =
-		vorbis_comment_block({"TITLE=Deep Field", "ARTIST=Nebula Bloom", "ALBUM=Parallax", "DATE=2021-04-05",
-				      "TRACKNUMBER=2/9", "GENRE=Ambient"});
-	std::vector<uint8_t> file;
-	put(file, "fLaC", 4);
-	/* STREAMINFO block first, as a real file has. */
-	file.push_back(0);
-	file.push_back(0);
-	file.push_back(0);
-	file.push_back(34);
-	file.resize(file.size() + 34, 0);
-	file.push_back(0x80 | 4);
-	file.push_back((comment.size() >> 16) & 0xFF);
-	file.push_back((comment.size() >> 8) & 0xFF);
-	file.push_back(comment.size() & 0xFF);
-	file.insert(file.end(), comment.begin(), comment.end());
+	spec.duration_ms = 200;
 
-	write_file("/tmp/vr-test.flac", file);
-
-	vr::Tags tags;
-	vr::read_tags("/tmp/vr-test.flac", tags);
-	check("flac title", tags.title, "Deep Field");
-	check("flac artist", tags.artist, "Nebula Bloom");
-	check("flac album", tags.album, "Parallax");
-	check("flac year", tags.year, "2021");
-	check("flac track", tags.track, "2");
-	check("flac genre", tags.genre, "Ambient");
-}
-
-/* --- Ogg Vorbis, comment packet split across two pages ---------------- */
-static void put_ogg_page(std::vector<uint8_t> &file, const std::vector<uint8_t> &packet_part, bool continued,
-			 uint32_t seq)
-{
-	std::vector<uint8_t> segments;
-	size_t remaining = packet_part.size();
-	while (remaining >= 255) {
-		segments.push_back(255);
-		remaining -= 255;
+	const std::string path = fixture::temp_path(std::string(label) + "." + spec.format);
+	std::string error;
+	if (!fixture::write(path, spec, &error)) {
+		printf("FAIL %s: could not write fixture: %s\n", label, error.c_str());
+		test::failures++;
+		return;
 	}
-	segments.push_back((uint8_t)remaining);
 
-	put(file, "OggS", 4);
-	file.push_back(0);
-	file.push_back(continued ? 0x01 : 0x00);
-	for (int i = 0; i < 8; i++)
-		file.push_back(0); /* granule */
-	put_le32(file, 1);         /* serial */
-	put_le32(file, seq);
-	put_le32(file, 0); /* crc, unchecked */
-	file.push_back((uint8_t)segments.size());
-	file.insert(file.end(), segments.begin(), segments.end());
-	file.insert(file.end(), packet_part.begin(), packet_part.end());
+	vr::AlbumArtData art;
+	const bool found = vr::read_embedded_art(path, art);
+	const std::vector<unsigned char> want = fixture::picture_bytes(want_index);
+	const std::string prefix = std::string(label) + " ";
+
+	check_true((prefix + "found").c_str(), found);
+	check_true((prefix + "right picture").c_str(), art.bytes == std::vector<uint8_t>(want.begin(), want.end()));
+	check_str((prefix + "mime").c_str(), art.mime, "image/png");
+
+	remove(path.c_str());
 }
 
-static void test_ogg_multipage()
+fixture::Spec spec(const char *format, const char *codec)
 {
-	std::vector<uint8_t> ident;
-	ident.push_back(1);
-	put(ident, "vorbis", 6);
-	ident.resize(30, 0);
-
-	std::vector<uint8_t> comment;
-	comment.push_back(3);
-	put(comment, "vorbis", 6);
-	/* A large padding comment forces the packet across a page boundary. */
-	std::vector<uint8_t> body = vorbis_comment_block(
-		{"TITLE=Split Packet", "ARTIST=Page Break", std::string("PADDING=") + std::string(600, 'x')});
-	comment.insert(comment.end(), body.begin(), body.end());
-	comment.push_back(1); /* framing bit */
-
-	std::vector<uint8_t> file;
-	put_ogg_page(file, ident, false, 0);
-
-	const size_t split = 300;
-	std::vector<uint8_t> first(comment.begin(), comment.begin() + split);
-	std::vector<uint8_t> rest(comment.begin() + split, comment.end());
-
-	/* First page ends mid-packet: pad it to a 255 byte lacing boundary. */
-	std::vector<uint8_t> first255(comment.begin(), comment.begin() + 255);
-	std::vector<uint8_t> remainder(comment.begin() + 255, comment.end());
-	put_ogg_page(file, first255, false, 1);
-	put_ogg_page(file, remainder, true, 2);
-
-	write_file("/tmp/vr-test.ogg", file);
-
-	vr::Tags tags;
-	vr::read_tags("/tmp/vr-test.ogg", tags);
-	check("ogg title (2 pages)", tags.title, "Split Packet");
-	check("ogg artist (2 pages)", tags.artist, "Page Break");
-	(void)first;
-	(void)rest;
-	(void)split;
+	fixture::Spec s;
+	s.format = format;
+	s.codec = codec;
+	return s;
 }
 
-/* --- Opus ------------------------------------------------------------- */
-static void test_opus()
-{
-	std::vector<uint8_t> head;
-	put(head, "OpusHead", 8);
-	head.resize(19, 0);
-
-	std::vector<uint8_t> tags_packet;
-	put(tags_packet, "OpusTags", 8);
-	std::vector<uint8_t> body = vorbis_comment_block({"TITLE=Opus Track", "ARTIST=Codec Crew"});
-	tags_packet.insert(tags_packet.end(), body.begin(), body.end());
-
-	std::vector<uint8_t> file;
-	put_ogg_page(file, head, false, 0);
-	put_ogg_page(file, tags_packet, false, 1);
-
-	write_file("/tmp/vr-test.opus", file);
-
-	vr::Tags tags;
-	vr::read_tags("/tmp/vr-test.opus", tags);
-	check("opus title", tags.title, "Opus Track");
-	check("opus artist", tags.artist, "Codec Crew");
-}
-
-/* --- MP4 / M4A -------------------------------------------------------- */
-static void append_box(std::vector<uint8_t> &out, const char *type, const std::vector<uint8_t> &content)
-{
-	put_be32(out, (uint32_t)(content.size() + 8));
-	put(out, type, 4);
-	out.insert(out.end(), content.begin(), content.end());
-}
-
-static std::vector<uint8_t> ilst_text(const char *type, const std::string &value)
-{
-	std::vector<uint8_t> data;
-	put_be32(data, 1); /* version + flags: UTF-8 */
-	put_be32(data, 0); /* locale */
-	data.insert(data.end(), value.begin(), value.end());
-
-	std::vector<uint8_t> data_box;
-	append_box(data_box, "data", data);
-
-	std::vector<uint8_t> item;
-	append_box(item, type, data_box);
-	return item;
-}
-
-static void test_mp4()
-{
-	std::vector<uint8_t> ilst;
-	for (auto &item : {ilst_text("\xa9"
-				     "nam",
-				     "Glass Tower"),
-			   ilst_text("\xa9"
-				     "ART",
-				     "Skyline"),
-			   ilst_text("\xa9"
-				     "alb",
-				     "Vertigo"),
-			   ilst_text("\xa9"
-				     "day",
-				     "2019-11-01"),
-			   ilst_text("\xa9"
-				     "gen",
-				     "Downtempo")})
-		ilst.insert(ilst.end(), item.begin(), item.end());
-
-	std::vector<uint8_t> trkn_data;
-	put_be32(trkn_data, 0);
-	put_be32(trkn_data, 0);
-	trkn_data.push_back(0);
-	trkn_data.push_back(0);
-	trkn_data.push_back(0);
-	trkn_data.push_back(5);
-	trkn_data.push_back(0);
-	trkn_data.push_back(11);
-	std::vector<uint8_t> trkn_databox;
-	append_box(trkn_databox, "data", trkn_data);
-	append_box(ilst, "trkn", trkn_databox);
-
-	std::vector<uint8_t> meta;
-	put_be32(meta, 0); /* full box version + flags */
-	append_box(meta, "ilst", ilst);
-
-	std::vector<uint8_t> udta;
-	append_box(udta, "meta", meta);
-
-	std::vector<uint8_t> moov;
-	append_box(moov, "udta", udta);
-
-	std::vector<uint8_t> file;
-	std::vector<uint8_t> ftyp_content;
-	put(ftyp_content, "M4A ", 4);
-	put_be32(ftyp_content, 0);
-	append_box(file, "ftyp", ftyp_content);
-	append_box(file, "mdat", std::vector<uint8_t>(128, 0));
-	append_box(file, "moov", moov);
-
-	write_file("/tmp/vr-test.m4a", file);
-
-	vr::Tags tags;
-	vr::read_tags("/tmp/vr-test.m4a", tags);
-	check("mp4 title", tags.title, "Glass Tower");
-	check("mp4 artist", tags.artist, "Skyline");
-	check("mp4 album", tags.album, "Vertigo");
-	check("mp4 year", tags.year, "2019");
-	check("mp4 genre", tags.genre, "Downtempo");
-	check("mp4 track", tags.track, "5");
-}
-
-/* --- WAV RIFF INFO ---------------------------------------------------- */
-static void test_wav()
-{
-	std::vector<uint8_t> info;
-	put(info, "INFO", 4);
-	auto add = [&](const char *id, const std::string &value) {
-		std::string padded = value;
-		padded.push_back('\0');
-		if (padded.size() & 1)
-			padded.push_back('\0');
-		put(info, id, 4);
-		put_le32(info, (uint32_t)padded.size());
-		info.insert(info.end(), padded.begin(), padded.end());
-	};
-	add("INAM", "Wave Rider");
-	add("IART", "Sampler");
-	add("ICRD", "2005");
-
-	std::vector<uint8_t> body;
-	put(body, "WAVE", 4);
-	put(body, "fmt ", 4);
-	put_le32(body, 16);
-	body.resize(body.size() + 16, 0);
-	put(body, "LIST", 4);
-	put_le32(body, (uint32_t)info.size());
-	body.insert(body.end(), info.begin(), info.end());
-
-	std::vector<uint8_t> file;
-	put(file, "RIFF", 4);
-	put_le32(file, (uint32_t)body.size());
-	file.insert(file.end(), body.begin(), body.end());
-
-	write_file("/tmp/vr-test.wav", file);
-
-	vr::Tags tags;
-	vr::read_tags("/tmp/vr-test.wav", tags);
-	check("wav title", tags.title, "Wave Rider");
-	check("wav artist", tags.artist, "Sampler");
-	check("wav year", tags.year, "2005");
-}
-
-/* --- Garbage input must not crash or invent tags ---------------------- */
-static void test_garbage()
-{
-	std::vector<uint8_t> file;
-	put(file, "ID3", 3);
-	file.push_back(3);
-	file.push_back(0);
-	file.push_back(0);
-	put_syncsafe(file, 0xFFFFFF);
-	for (int i = 0; i < 64; i++)
-		file.push_back((uint8_t)(i * 37));
-	write_file("/tmp/vr-test-garbage.mp3", file);
-
-	vr::Tags tags;
-	vr::read_tags("/tmp/vr-test-garbage.mp3", tags);
-	check("garbage yields nothing", tags.title, "");
-
-	vr::Tags empty;
-	vr::read_tags("/tmp/vr-does-not-exist.mp3", empty);
-	check("missing file", empty.title, "");
-}
+} // namespace
 
 int main()
 {
-	test_id3v23();
-	test_id3v24_utf16();
-	test_id3v1();
-	test_flac();
-	test_ogg_multipage();
-	test_opus();
-	test_mp4();
-	test_wav();
-	test_garbage();
+	/* Tags in every container. */
+	check_container("flac", spec("flac", "flac"));
+	check_container("ogg-vorbis", spec("ogg", "libvorbis"));
+	check_container("ogg-opus", spec("ogg", "libopus"));
+	check_container("m4a", spec("ipod", "aac"));
+	check_container("wav", spec("wav", "pcm_s16le"));
 
-	printf("\n%s (%d failures)\n", failures ? "FAILURES" : "ALL TAG TESTS PASSED", failures);
-	return failures ? 1 : 0;
+	{
+		fixture::Spec mp3 = spec("mp3", "libmp3lame");
+		mp3.muxer_options = {{"id3v2_version", "4"}};
+		check_container("mp3-id3v2.4", mp3);
+
+		mp3.muxer_options = {{"id3v2_version", "3"}};
+		check_container("mp3-id3v2.3", mp3);
+	}
+
+	/* Non-ASCII text survives (ID3v2.3 stores it as UTF-16). */
+	{
+		fixture::Spec mp3 = spec("mp3", "libmp3lame");
+		if (fixture::supported(mp3)) {
+			mp3.muxer_options = {{"id3v2_version", "3"}};
+			mp3.metadata = {{"title", "Ünïcode Søñg"}};
+			mp3.duration_ms = 200;
+			const std::string path = fixture::temp_path("unicode.mp3");
+			fixture::write(path, mp3);
+
+			vr::Tags tags;
+			vr::read_tags(path, tags);
+			check_str("mp3 unicode title", tags.title, "Ünïcode Søñg");
+			remove(path.c_str());
+		}
+	}
+
+	/* ID3v1 only, with its genre stored as a number. FFmpeg's muxer will not
+	 * write a bare ID3v1 tag, so it is appended by hand. */
+	{
+		fixture::Spec mp3 = spec("mp3", "libmp3lame");
+		if (fixture::supported(mp3)) {
+			mp3.muxer_options = {{"id3v2_version", "0"}};
+			mp3.duration_ms = 200;
+			const std::string path = fixture::temp_path("id3v1.mp3");
+			fixture::write(path, mp3);
+
+			char tag[128] = {};
+			const auto put = [&](size_t offset, size_t size, const char *text) {
+				strncpy(tag + offset, text, size);
+			};
+			put(0, 3, "TAG");
+			put(3, 30, "Old School");
+			put(33, 30, "Tape Deck");
+			put(63, 30, "Cassette");
+			put(93, 4, "1998");
+			tag[126] = 7;  /* ID3v1.1 track number */
+			tag[127] = 17; /* genre 17 is Rock */
+			std::ofstream(path, std::ios::binary | std::ios::app).write(tag, sizeof(tag));
+
+			vr::Tags tags;
+			vr::read_tags(path, tags);
+			check_str("id3v1 title", tags.title, "Old School");
+			check_str("id3v1 artist", tags.artist, "Tape Deck");
+			check_str("id3v1 album", tags.album, "Cassette");
+			check_str("id3v1 year", tags.year, "1998");
+			check_str("id3v1 track", tags.track, "7");
+			check_str("id3v1 genre", tags.genre, "Rock");
+			remove(path.c_str());
+		}
+	}
+
+	/* Files that are not media, or not there. */
+	{
+		const std::string path = fixture::temp_path("garbage.mp3");
+		std::ofstream(path) << "this is not an audio file, whatever its name says";
+
+		vr::Tags tags;
+		check_true("garbage: nothing found", !vr::read_tags(path, tags));
+		check_str("garbage: no title", tags.title, "");
+
+		vr::AlbumArtData art;
+		check_true("garbage: no art", !vr::read_embedded_art(path, art));
+		remove(path.c_str());
+
+		check_true("missing file: no tags", !vr::read_tags("/nonexistent/void-radio.flac", tags));
+		check_true("url: not read", !vr::read_tags("https://example.com/stream.mp3", tags));
+	}
+
+	/* Embedded art: the front cover wins over pictures listed before it. */
+	{
+		fixture::Spec flac = spec("flac", "flac");
+		flac.pictures = {"Cover (back)", "Cover (front)"};
+		check_art("flac art: front cover preferred", flac, 1);
+
+		flac.pictures = {"Artist/performer", "Cover (back)"};
+		check_art("flac art: first picture otherwise", flac, 0);
+
+		fixture::Spec mp3 = spec("mp3", "libmp3lame");
+		mp3.pictures = {"Cover (front)"};
+		check_art("mp3 art", mp3, 0);
+
+		fixture::Spec m4a = spec("ipod", "aac");
+		m4a.pictures = {"Cover (front)"};
+		check_art("m4a art", m4a, 0);
+
+		fixture::Spec wav = spec("wav", "pcm_s16le");
+		const std::string path = fixture::temp_path("noart.wav");
+		wav.duration_ms = 200;
+		fixture::write(path, wav);
+		vr::AlbumArtData art;
+		check_true("wav: no art", !vr::read_embedded_art(path, art));
+		remove(path.c_str());
+	}
+
+	/* Sidecar art: the best-named image next to the track. */
+	{
+		const std::string dir = fixture::temp_path("sidecar");
+		mkdir(dir.c_str(), 0755);
+
+		const std::string track = dir + "/song.flac";
+		for (const char *name : {"song.flac", "thumb.jpg", "Folder.PNG", "notes.txt"})
+			std::ofstream(dir + "/" + name) << "x";
+
+		check_str("sidecar: best name wins", vr::find_sidecar_art(track), dir + "/Folder.PNG");
+
+		for (const char *name : {"song.flac", "thumb.jpg", "Folder.PNG", "notes.txt"})
+			remove((dir + "/" + name).c_str());
+		rmdir(dir.c_str());
+
+		check_str("sidecar: url has none", vr::find_sidecar_art("https://example.com/a.mp3"), "");
+	}
+
+	return test::finish();
 }
