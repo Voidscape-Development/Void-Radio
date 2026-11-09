@@ -58,7 +58,7 @@ public:
 	 * counted in samples rather than taken from packet timestamps. */
 	virtual int64_t position_ms() const = 0;
 
-	/* 0 when unknown, as for a live stream. */
+	/* 0 when unknown. */
 	virtual int64_t duration_ms() const = 0;
 
 	virtual bool seekable() const = 0;

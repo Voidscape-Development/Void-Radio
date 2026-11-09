@@ -60,7 +60,7 @@ struct Snapshot {
 	int count = 0;
 
 	int64_t elapsed_ms = 0;
-	int64_t duration_ms = 0; /* 0 when unknown, as for a live stream */
+	int64_t duration_ms = 0; /* 0 when unknown */
 	bool seekable = false;
 
 	/* 0..1, already interpolated between decoder updates so the bar moves

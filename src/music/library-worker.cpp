@@ -21,6 +21,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include "music/track-tags.hpp"
 #include "util/vr-util.hpp"
 
+#include <util/base.h>
 #include <util/platform.h>
 #include <util/threading.h>
 
@@ -47,6 +48,14 @@ namespace {
 
 std::vector<PlaylistEntry> build_entries(const PlaylistConfig &config)
 {
+	/* Internet streams are no longer played; say so for any an older
+	 * scene collection still lists, rather than dropping them silently. */
+	for (const std::string &path : config.paths) {
+		if (is_url(path))
+			blog(LOG_WARNING, "[void-radio] internet streams are no longer supported, skipping %s",
+			     path.c_str());
+	}
+
 	const std::vector<std::string> expanded = expand_paths(config.paths, config.recurse);
 
 	std::vector<PlaylistEntry> entries;
@@ -55,8 +64,7 @@ std::vector<PlaylistEntry> build_entries(const PlaylistConfig &config)
 	for (const std::string &path : expanded) {
 		PlaylistEntry entry;
 		entry.path = path;
-		entry.url = is_url(path);
-		entry.missing = !entry.url && !os_file_exists(path.c_str());
+		entry.missing = !os_file_exists(path.c_str());
 
 		for (const PlaylistEntry &override_entry : config.overrides) {
 			if (override_entry.path == path) {
@@ -156,7 +164,7 @@ void LibraryWorker::run()
 		Tags tags;
 		read_tags(tags_path, tags);
 
-		if (!measure || is_url(tags_path) || !std::isnan(tags.track_loudness)) {
+		if (!measure || !std::isnan(tags.track_loudness)) {
 			tags.loudness_checked = measure;
 			on_tags_(tags_path, tags);
 			continue;

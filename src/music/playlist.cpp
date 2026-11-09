@@ -33,7 +33,7 @@ std::string PlaylistEntry::display_title() const
 	if (!tags.title.empty())
 		return tags.title;
 
-	return url ? path : file_stem(path);
+	return file_stem(path);
 }
 
 std::string PlaylistEntry::display_artist() const
@@ -99,10 +99,10 @@ std::vector<std::string> expand_paths(const std::vector<std::string> &paths, boo
 		if (path.empty())
 			continue;
 
-		if (is_url(path)) {
-			out.push_back(path);
+		/* Internet streams used to be playable. A scene collection
+		 * saved back then can still list them; they are left out. */
+		if (is_url(path))
 			continue;
-		}
 
 		/* A path is only treated as a folder when it opens as one. */
 		os_dir_t *dir = os_opendir(path.c_str());

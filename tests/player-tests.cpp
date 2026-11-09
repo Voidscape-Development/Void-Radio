@@ -404,7 +404,7 @@ int main()
 		check("restart seeks the deck", rig.latest["/t/2"]->seeks, 1);
 	}
 
-	/* Live streams cannot seek. */
+	/* A deck that cannot seek, and has no length to seek within. */
 	{
 		DeckScript script;
 		script.seekable = false;

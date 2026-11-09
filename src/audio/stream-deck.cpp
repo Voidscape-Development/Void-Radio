@@ -27,13 +27,11 @@ namespace {
 
 constexpr int64_t BUFFER_AHEAD_MS = 500;
 constexpr int64_t BUFFER_SLACK_MS = 1500;
-constexpr int STREAM_RETRY_SECONDS = 5;
 
 } // namespace
 
-StreamDeck::StreamDeck(std::string path, bool is_url, const AudioFormat &format, LogFn log)
+StreamDeck::StreamDeck(std::string path, const AudioFormat &format, LogFn log)
 	: path_(std::move(path)),
-	  is_url_(is_url),
 	  format_(format),
 	  log_(std::move(log)),
 	  target_frames_(ms_to_frames(BUFFER_AHEAD_MS, format.sample_rate)),
@@ -155,19 +153,13 @@ bool StreamDeck::produced() const
 bool StreamDeck::open_decoder(AudioDecoder &decoder)
 {
 	std::string error;
-	if (decoder.open(path_, is_url_, format_, &interrupt_, &error))
+	if (decoder.open(path_, format_, &interrupt_, &error))
 		return true;
 
 	if (log_ && !abort_.load())
 		log_("could not play '" + path_ + "': " + error);
 
 	return false;
-}
-
-void StreamDeck::wait_for_retry()
-{
-	std::unique_lock<std::mutex> lock(mutex_);
-	cv_.wait_for(lock, std::chrono::seconds(STREAM_RETRY_SECONDS), [this]() { return abort_.load(); });
 }
 
 void StreamDeck::run()
@@ -230,8 +222,6 @@ void StreamDeck::run()
 		int64_t start_frame = 0;
 		const AudioDecoder::Status status = decoder.decode(planes, frames, start_frame);
 
-		bool reconnect = false;
-
 		{
 			std::unique_lock<std::mutex> lock(mutex_);
 
@@ -265,36 +255,16 @@ void StreamDeck::run()
 			if (status == AudioDecoder::Status::EndOfStream) {
 				eof_ = true;
 			} else if (status == AudioDecoder::Status::Error) {
-				if (is_url_ && produced_) {
-					reconnect = true;
-				} else {
-					/* A file that played and then hit damage ends
-					 * there; one that never played failed. */
-					if (produced_)
-						eof_ = true;
-					else
-						failed_ = true;
+				/* A file that played and then hit damage ends
+				 * there; one that never played failed. */
+				if (produced_)
+					eof_ = true;
+				else
+					failed_ = true;
 
-					if (log_)
-						log_("stopped reading '" + path_ + "': " + decoder.last_error());
-				}
+				if (log_)
+					log_("stopped reading '" + path_ + "': " + decoder.last_error());
 			}
-		}
-
-		if (!reconnect)
-			continue;
-
-		if (log_)
-			log_("stream dropped, reconnecting: " + path_);
-
-		decoder.close();
-
-		while (!abort_.load()) {
-			wait_for_retry();
-			if (abort_.load())
-				return;
-			if (open_decoder(decoder))
-				break;
 		}
 	}
 }

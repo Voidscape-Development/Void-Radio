@@ -129,7 +129,7 @@ int main()
 	{
 		vr::AudioDecoder decoder;
 		std::string error;
-		check_true("flac: opens", decoder.open(flac_path, false, FORMAT, nullptr, &error));
+		check_true("flac: opens", decoder.open(flac_path, FORMAT, nullptr, &error));
 		check("flac: duration", decoder.duration_ms(), 2000);
 		check_true("flac: seekable", decoder.seekable());
 		decode_all("flac", decoder, 2 * RATE, true);
@@ -138,7 +138,7 @@ int main()
 	/* Seeks land on the exact sample asked for. */
 	{
 		vr::AudioDecoder decoder;
-		decoder.open(flac_path, false, FORMAT, nullptr);
+		decoder.open(flac_path, FORMAT, nullptr);
 
 		for (int64_t ms : {1234, 250, 1999, 0}) {
 			check_true("seek: accepted", decoder.seek(ms));
@@ -164,7 +164,7 @@ int main()
 		const std::string path = make("44k.wav", wav);
 
 		vr::AudioDecoder decoder;
-		check_true("wav 44.1k mono: opens", decoder.open(path, false, FORMAT, nullptr));
+		check_true("wav 44.1k mono: opens", decoder.open(path, FORMAT, nullptr));
 		std::vector<float> planes[vr::MAX_MIX_CHANNELS];
 		int64_t total = 0;
 		size_t frames;
@@ -181,10 +181,10 @@ int main()
 		vr::AudioDecoder decoder;
 		std::string error;
 		check_true("missing file: fails",
-			   !decoder.open("/nonexistent/void-radio.flac", false, FORMAT, nullptr, &error));
+			   !decoder.open("/nonexistent/void-radio.flac", FORMAT, nullptr, &error));
 		check_true("missing file: says why", !error.empty());
 
-		vr::StreamDeck deck("/nonexistent/void-radio.flac", false, FORMAT);
+		vr::StreamDeck deck("/nonexistent/void-radio.flac", FORMAT);
 		check_true("missing file: deck fails",
 			   wait_state(deck, vr::Deck::State::Failed) == vr::Deck::State::Failed);
 		check_true("missing file: produced nothing", !deck.produced());
@@ -195,7 +195,7 @@ int main()
 	 * must carry on from the new position rather than ending.
 	 */
 	const auto seek_regression = [](const char *label, const std::string &path, bool exact) {
-		vr::StreamDeck deck(path, false, FORMAT);
+		vr::StreamDeck deck(path, FORMAT);
 		read_for(deck, 300);
 
 		deck.seek(1200);

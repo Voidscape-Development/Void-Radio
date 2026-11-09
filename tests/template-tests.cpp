@@ -63,11 +63,11 @@ int main()
 	check("empty field alone", run("{artist}"), "");
 	check("two groups", run("[{artist} - ]{title}[ ({album})]"), "Neon Drift (After Hours)");
 
-	/* A live stream has no duration. */
+	/* A track whose length is unknown. */
 	snapshot.duration_ms = 0;
 	snapshot.progress = 0.0f;
-	check("stream duration empty", run("{elapsed}[ / {duration}]"), "1:05");
-	check("stream percent empty", run("[{percent}]"), "");
+	check("unknown duration empty", run("{elapsed}[ / {duration}]"), "1:05");
+	check("unknown percent empty", run("[{percent}]"), "");
 
 	/* The fields added for the widget's extra details. */
 	{

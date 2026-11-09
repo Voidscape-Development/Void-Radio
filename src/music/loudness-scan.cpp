@@ -39,7 +39,7 @@ bool measure_loudness(const std::string &path, float &loudness, float &peak, con
 	const AudioFormat format{48000, 2, 0};
 
 	AudioDecoder decoder;
-	if (!decoder.open(path, false, format, interrupt))
+	if (!decoder.open(path, format, interrupt))
 		return false;
 
 	LoudnessMeter meter(format.sample_rate, format.channels);

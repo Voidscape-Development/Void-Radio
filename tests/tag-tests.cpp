@@ -185,7 +185,6 @@ int main()
 		remove(path.c_str());
 
 		check_true("missing file: no tags", !vr::read_tags("/nonexistent/void-radio.flac", tags));
-		check_true("url: not read", !vr::read_tags("https://example.com/stream.mp3", tags));
 	}
 
 	/* Embedded art: the front cover wins over pictures listed before it. */
@@ -228,8 +227,6 @@ int main()
 		for (const char *name : {"song.flac", "thumb.jpg", "Folder.PNG", "notes.txt"})
 			remove((dir + "/" + name).c_str());
 		rmdir(dir.c_str());
-
-		check_str("sidecar: url has none", vr::find_sidecar_art("https://example.com/a.mp3"), "");
 	}
 
 	/* Loudness from ReplayGain and R128 values. */

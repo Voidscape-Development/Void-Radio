@@ -194,7 +194,6 @@ void get_playlist(obs_data_t *request, obs_data_t *response, void *)
 		obs_data_set_string(item, "title", entries[i].title.c_str());
 		obs_data_set_string(item, "artist", entries[i].artist.c_str());
 		obs_data_set_string(item, "path", entries[i].path.c_str());
-		obs_data_set_bool(item, "stream", entries[i].url);
 		obs_data_array_push_back(array, item);
 		obs_data_release(item);
 	}

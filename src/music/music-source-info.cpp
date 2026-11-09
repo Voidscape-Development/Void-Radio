@@ -176,8 +176,8 @@ obs_properties_t *source_properties(void *data)
 	obs_properties_t *props = obs_properties_create();
 
 	obs_properties_add_editable_list(props, "playlist", obs_module_text("Music.Playlist"),
-					 OBS_EDITABLE_LIST_TYPE_FILES_AND_URLS,
-					 obs_module_text("Music.Playlist.Filter"), nullptr);
+					 OBS_EDITABLE_LIST_TYPE_FILES, obs_module_text("Music.Playlist.Filter"),
+					 nullptr);
 
 	obs_properties_add_bool(props, "recurse_dirs", obs_module_text("Music.RecurseDirs"));
 	obs_properties_add_bool(props, "shuffle", obs_module_text("Music.Shuffle"));

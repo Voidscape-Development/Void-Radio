@@ -37,7 +37,7 @@ std::string av_error_string(int code)
 	return buffer;
 }
 
-FormatPtr open_input(const std::string &path, bool is_url, const InterruptFn *interrupt, std::string *error)
+FormatPtr open_input(const std::string &path, const InterruptFn *interrupt, std::string *error)
 {
 	AVFormatContext *raw = avformat_alloc_context();
 	if (!raw) {
@@ -51,21 +51,8 @@ FormatPtr open_input(const std::string &path, bool is_url, const InterruptFn *in
 		raw->interrupt_callback.opaque = const_cast<InterruptFn *>(interrupt);
 	}
 
-	AVDictionary *options = nullptr;
-
-	if (is_url) {
-		/* Microseconds. A stalled stream gives up rather than hanging
-		 * the deck, and HTTP drops are retried inside FFmpeg first. */
-		av_dict_set(&options, "rw_timeout", "15000000", 0);
-		av_dict_set(&options, "reconnect", "1", 0);
-		av_dict_set(&options, "reconnect_streamed", "1", 0);
-		av_dict_set(&options, "reconnect_on_network_error", "1", 0);
-		av_dict_set(&options, "reconnect_delay_max", "5", 0);
-	}
-
 	/* On failure avformat_open_input frees the context itself. */
-	const int ret = avformat_open_input(&raw, path.c_str(), nullptr, &options);
-	av_dict_free(&options);
+	const int ret = avformat_open_input(&raw, path.c_str(), nullptr, nullptr);
 
 	if (ret < 0) {
 		if (error)

@@ -154,10 +154,10 @@ bool read_tags(const std::string &path, Tags &out)
 {
 	out = Tags();
 
-	if (path.empty() || is_url(path))
+	if (path.empty())
 		return false;
 
-	FormatPtr format = open_input(path, false, nullptr, nullptr);
+	FormatPtr format = open_input(path, nullptr, nullptr);
 	if (!format)
 		return false;
 

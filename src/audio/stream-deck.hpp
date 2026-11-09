@@ -34,19 +34,18 @@ namespace vr {
 /*
  * A Deck backed by an AudioDecoder on its own thread.
  *
- * The thread opens the file (which for a URL can take seconds), then keeps a
- * short buffer of decoded audio ahead of playback. The engine thread only ever
- * takes from that buffer, so it never waits on the disk or the network.
+ * The thread opens the file, then keeps a short buffer of decoded audio ahead
+ * of playback. The engine thread only ever takes from that buffer, so it
+ * never waits on the disk.
  *
  * A seek clears the buffer at once and hands the new position to the thread;
  * anything the thread decodes for the old position after that is thrown away.
- * A stream that drops after it has played is reopened rather than ended.
  */
 class StreamDeck final : public Deck {
 public:
 	using LogFn = std::function<void(const std::string &)>;
 
-	StreamDeck(std::string path, bool is_url, const AudioFormat &format, LogFn log = {});
+	StreamDeck(std::string path, const AudioFormat &format, LogFn log = {});
 	~StreamDeck() override;
 
 	StreamDeck(const StreamDeck &) = delete;
@@ -63,12 +62,10 @@ public:
 private:
 	void run();
 	bool open_decoder(AudioDecoder &decoder);
-	void wait_for_retry();
 	void clear_buffer_locked();
 	size_t buffered_locked() const { return fifo_[0].size(); }
 
 	const std::string path_;
-	const bool is_url_;
 	const AudioFormat format_;
 	const LogFn log_;
 

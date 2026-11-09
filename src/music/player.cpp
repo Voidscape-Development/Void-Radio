@@ -175,7 +175,7 @@ std::string Player::next_untagged() const
 {
 	const bool measure = wants_measure();
 	const auto wants_tags = [measure](const PlaylistEntry *entry) {
-		if (!entry || entry->url)
+		if (!entry)
 			return false;
 		if (!entry->tags_loaded)
 			return true;
@@ -542,9 +542,7 @@ void Player::maybe_prefetch()
 	const int next = playlist_.peek_next(settings_.repeat);
 	const PlaylistEntry *entry = playlist_.at(next);
 
-	/* A stream holds a connection open for as long as its deck lives, so
-	 * one is only opened when it is actually going to play. */
-	if (!entry || entry->url)
+	if (!entry)
 		return;
 
 	prefetch_ = make_voice(next);
@@ -815,7 +813,7 @@ void Player::fill_snapshot(Snapshot &snapshot) const
 		snapshot.codec = entry->tags.codec;
 		snapshot.bitrate = entry->tags.bitrate;
 		snapshot.samplerate = entry->tags.samplerate;
-		snapshot.seekable = !entry->url && snapshot.duration_ms > 0 && current_ && current_->deck->seekable();
+		snapshot.seekable = snapshot.duration_ms > 0 && current_ && current_->deck->seekable();
 	}
 
 	const PlaylistEntry *next_entry = playlist_.at(playlist_.peek_next(settings_.repeat));

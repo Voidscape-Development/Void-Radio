@@ -34,7 +34,6 @@ enum class RepeatMode {
 
 struct PlaylistEntry {
 	std::string path;
-	bool url = false;
 	bool tags_loaded = false;
 	bool missing = false;
 	Tags tags;

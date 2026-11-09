@@ -181,6 +181,14 @@ int main()
 		check_true("override beats tag", entry.display_title() == "Manual");
 	}
 
+	/* Internet streams are left out of a playlist, files kept. */
+	{
+		const std::vector<std::string> expanded = vr::expand_paths(
+			{"https://radio.example.com/live.mp3", "/music/a.flac", "http://x/y.ogg"}, false);
+		check("streams dropped", (long)expanded.size(), 1);
+		check_true("file kept", !expanded.empty() && expanded[0] == "/music/a.flac");
+	}
+
 	printf("\n%s (%d failures)\n", failures ? "FAILURES" : "ALL PLAYLIST TESTS PASSED", failures);
 	return failures ? 1 : 0;
 }

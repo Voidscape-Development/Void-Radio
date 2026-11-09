@@ -186,8 +186,8 @@ So when you add a transport feature, it goes in `Player` and is reached by posti
   expose it through `music-api.hpp` and, if wanted, `source-hotkeys.cpp`.
 - **A new source setting**: default and property in `music-source-info.cpp`, read it in
   `music-source-settings.cpp` (into `PlayerSettings` if the player needs it).
-- **Decoding, seeking, streams**: `AudioDecoder` (formats, seek accuracy, resampling) and
-  `StreamDeck` (buffering, reconnecting). `tests/decoder-tests.cpp` writes real files with
+- **Decoding and seeking**: `AudioDecoder` (formats, seek accuracy, resampling) and
+  `StreamDeck` (buffering). `tests/decoder-tests.cpp` writes real files with
   FFmpeg and checks every sample.
 - **What a track is called**: `track-tags.cpp` for reading, `PlaylistEntry::display_title` for
   the fallbacks.
@@ -208,7 +208,7 @@ So when you add a transport feature, it goes in `Player` and is reached by posti
 ## Things that are easy to get wrong
 
 - **Never block the engine thread.** It produces audio in real time. Anything that touches the
-  disk or the network belongs on a deck thread or the library worker.
+  disk belongs on a deck thread or the library worker.
 - **Output timestamps come from the sample count**, not the clock: the start of a run of audio
   plus samples sent. Do not stamp blocks with `os_gettime_ns()` - jittery timestamps make OBS
   resync, which is audible.

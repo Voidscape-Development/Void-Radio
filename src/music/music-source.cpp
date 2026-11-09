@@ -104,7 +104,7 @@ MusicSource::MusicSource(obs_data_t *settings, obs_source_t *source) : self_(sou
 	player_ = std::make_unique<Player>(
 		format,
 		[format](const PlaylistEntry &entry) -> std::unique_ptr<Deck> {
-			return std::make_unique<StreamDeck>(entry.path, entry.url, format, log_warning);
+			return std::make_unique<StreamDeck>(entry.path, format, log_warning);
 		},
 		log_warning);
 
@@ -270,7 +270,6 @@ void MusicSource::publish()
 		info.path = entry.path;
 		info.title = entry.display_title();
 		info.artist = entry.display_artist();
-		info.url = entry.url;
 		info.missing = entry.missing;
 		entries.push_back(std::move(info));
 	}

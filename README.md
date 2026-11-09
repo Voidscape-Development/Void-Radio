@@ -11,7 +11,7 @@ text source.
 A playlist driven audio source, in the spirit of the VLC playlist source but audio only and
 built around music playback.
 
-* Add individual files, whole folders (optionally including subfolders), and network URLs.
+* Add individual files and whole folders, optionally including subfolders.
 * Shuffle, repeat all, repeat one, or stop at the end of the list.
 * Crossfade between tracks, or a plain silent gap when crossfade is off. Crossfading applies to
   natural track ends and to manual skips alike, and is clamped so a short track cannot be
@@ -179,9 +179,9 @@ A video source that shows how far along the selected Music Source is.
 * On a track change the bar animates: it fills to the end and sweeps back to the start
   (configurable duration), eases back from wherever it was, or jumps instantly. Playback ending
   runs the same animation, down to an empty bar.
-* Choose what it does when nothing is playing, or when the source is a live stream with no fixed
-  length: sit empty, hide, or run a looping sweep. Pausing can be made to count as nothing
-  playing as well, which it does not by default.
+* Choose what it does when nothing is playing, or when a track's length is unknown: sit empty,
+  hide, or run a looping sweep. Pausing can be made to count as nothing playing as well, which
+  it does not by default.
 
 ### Music Info
 

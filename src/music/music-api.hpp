@@ -48,7 +48,6 @@ struct EntryInfo {
 	std::string path;
 	std::string title;
 	std::string artist;
-	bool url = false;
 	bool missing = false;
 };
 
