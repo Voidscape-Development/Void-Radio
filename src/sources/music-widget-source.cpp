@@ -416,6 +416,13 @@ static void widget_tick(void *data, float seconds)
 	if (replay && !preview_active)
 		on_track_start(widget);
 
+	{
+		std::lock_guard<std::mutex> lock(widget->preview_mutex);
+		widget->have_shown = snapshot != nullptr;
+		if (snapshot)
+			widget->shown_snapshot = *snapshot;
+	}
+
 	/* With nothing playing, a card that only shows itself on track changes
 	 * gets out of the way straight off. */
 	if (widget->idle && widget->popup_mode == PopupMode::OnTrackChange &&
@@ -521,6 +528,19 @@ void set_widget_sample_track(obs_source_t *source, bool active, bool long_text)
 		widget->preview.time = 20.0f;
 	widget->preview.active = active;
 	widget->preview.long_text = long_text;
+}
+
+bool get_widget_snapshot(obs_source_t *source, Snapshot &out)
+{
+	widget::MusicWidget *widget = widget::widget_of(source);
+	if (!widget)
+		return false;
+
+	std::lock_guard<std::mutex> lock(widget->preview_mutex);
+	if (!widget->have_shown)
+		return false;
+	out = widget->shown_snapshot;
+	return true;
 }
 
 void replay_widget_track_change(obs_source_t *source)

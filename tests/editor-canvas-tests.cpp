@@ -10,6 +10,7 @@
 #include <QApplication>
 #include <QKeyEvent>
 #include <QMouseEvent>
+#include <QWheelEvent>
 
 #include <cmath>
 
@@ -151,6 +152,122 @@ int main(int argc, char **argv)
 		QKeyEvent escape(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
 		QApplication::sendEvent(&canvas, &escape);
 		check_true("escape deselects", canvas.selected().isEmpty());
+	}
+
+	/* Shift-click builds a selection, and dragging any member moves it all. */
+	{
+		canvas.setElements(elements());
+		canvas.setSelected(QString());
+		QVector<vr::editor::CanvasMove> last;
+		bool group_finished = false;
+		const auto connection =
+			QObject::connect(&canvas, &EditorCanvas::elementsMoved,
+					 [&](const QVector<vr::editor::CanvasMove> &moves, bool finished) {
+						 last = moves;
+						 group_finished = finished;
+					 });
+
+		const QPointF art = canvas.toView(QPointF(90, 90));
+		const QPointF line = canvas.toView(QPointF(300, 60));
+		mouse(canvas, QEvent::MouseButtonPress, art);
+		mouse(canvas, QEvent::MouseButtonRelease, art);
+		mouse(canvas, QEvent::MouseButtonPress, line, Qt::ShiftModifier);
+		mouse(canvas, QEvent::MouseButtonRelease, line, Qt::ShiftModifier);
+		check("shift-click: two selected", (long long)canvas.selection().size(), 2);
+		check_true("shift-click: newest is primary", canvas.selected() == "t0_");
+
+		drag(canvas, QPointF(90, 90), QPointF(110, 100), Qt::AltModifier);
+		check("group drag: both moved", (long long)last.size(), 2);
+		check_true("group drag: finished", group_finished);
+		bool art_moved = false, line_moved = false;
+		for (const auto &move : last) {
+			if (move.id == "art_")
+				art_moved = std::fabs(move.rect.x() - 40) < 0.6 && std::fabs(move.rect.y() - 30) < 0.6;
+			if (move.id == "t0_")
+				line_moved = std::fabs(move.rect.x() - 200) < 0.6 &&
+					     std::fabs(move.rect.y() - 50) < 0.6;
+		}
+		check_true("group drag: art by the same amount", art_moved);
+		check_true("group drag: line by the same amount", line_moved);
+		check("group drag: still both selected", (long long)canvas.selection().size(), 2);
+
+		/* Shift-click on a member takes it out again. */
+		canvas.setElements(elements());
+		const QPointF line_now = canvas.toView(QPointF(300, 60));
+		mouse(canvas, QEvent::MouseButtonPress, line_now, Qt::ShiftModifier);
+		mouse(canvas, QEvent::MouseButtonRelease, line_now, Qt::ShiftModifier);
+		check("shift-click again: one left", (long long)canvas.selection().size(), 1);
+
+		/* A plain click on one member of a selection narrows it down. */
+		canvas.setSelection({"art_", "t0_"});
+		mouse(canvas, QEvent::MouseButtonPress, line_now);
+		mouse(canvas, QEvent::MouseButtonRelease, line_now);
+		check("plain click: narrows to one", (long long)canvas.selection().size(), 1);
+		check_true("plain click: the one clicked", canvas.selected() == "t0_");
+
+		/* Arrow keys move every selected element. */
+		canvas.setSelection({"art_", "bar_"});
+		QKeyEvent left(QEvent::KeyPress, Qt::Key_Left, Qt::NoModifier);
+		QApplication::sendEvent(&canvas, &left);
+		check("nudge: moves both", (long long)last.size(), 2);
+
+		QObject::disconnect(connection);
+	}
+
+	/* Dragging across empty space selects what the band touches. */
+	{
+		canvas.setElements(elements());
+		canvas.setSelected(QString());
+		drag(canvas, QPointF(170, 30), QPointF(600, 150));
+		check("band: line and bar", (long long)canvas.selection().size(), 2);
+		check_true("band: hidden line left out", !canvas.selection().contains("t1_"));
+		check_true("band: art left out", !canvas.selection().contains("art_"));
+	}
+
+	/* A locked element can be selected but not dragged, and has no handles. */
+	{
+		QVector<CanvasElement> locked = elements();
+		locked[0].locked = true;
+		canvas.setElements(locked);
+		canvas.setSelected(QString());
+		const int moves = rec.moves;
+		const int starts = rec.drag_starts;
+		drag(canvas, QPointF(90, 90), QPointF(130, 90));
+		check_true("locked: selected", canvas.selected() == "art_");
+		check("locked: not moved", rec.moves, moves);
+		check("locked: no drag", rec.drag_starts, starts);
+
+		QKeyEvent right(QEvent::KeyPress, Qt::Key_Right, Qt::NoModifier);
+		QApplication::sendEvent(&canvas, &right);
+		check("locked: not nudged", rec.moves, moves);
+	}
+
+	/* Zooming keeps the point under the mouse where it was. */
+	{
+		canvas.setElements(elements());
+		canvas.zoomToFit();
+		const QPointF under = canvas.toView(QPointF(320, 90));
+		const double before = canvas.pixelScale();
+
+		QWheelEvent wheel(under, canvas.mapToGlobal(under), QPoint(), QPoint(0, 120), Qt::NoButton,
+				  Qt::ControlModifier, Qt::NoScrollPhase, false);
+		QApplication::sendEvent(&canvas, &wheel);
+		check_true("zoom: closer", canvas.pixelScale() > before * 1.1);
+		check_true("zoom: point stays put", QLineF(canvas.toView(QPointF(320, 90)), under).length() < 0.5);
+
+		canvas.zoomToFit();
+		check_near("fit: back to 1", canvas.zoom(), 1.0, 1e-9);
+	}
+
+	/* With grid snapping on, a drag lands on the grid. */
+	{
+		canvas.setElements(elements());
+		canvas.setGrid(true, 25, true);
+		canvas.setSelected(QString());
+		drag(canvas, QPointF(300, 60), QPointF(337, 93));
+		check_near("grid: x on the grid", std::fmod(rec.rect.x(), 25.0), 0.0, 0.01);
+		check_near("grid: y on the grid", std::fmod(rec.rect.y(), 25.0), 0.0, 0.01);
+		canvas.setGrid(false, 10, false);
 	}
 
 	/* A picture of the canvas, for looking at by eye. */

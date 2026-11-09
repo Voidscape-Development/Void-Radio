@@ -18,6 +18,8 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 
 #pragma once
 
+#include "music/snapshot.hpp"
+
 #include <obs.h>
 
 namespace vr {
@@ -39,5 +41,9 @@ void set_widget_sample_track(obs_source_t *widget, bool active, bool long_text);
  * sample track; otherwise runs the pop-in, entrances and transition as if a
  * track had just started. */
 void replay_widget_track_change(obs_source_t *widget);
+
+/* The track the widget is showing, sample track included, for previewing a
+ * template. False when it is showing nothing. */
+bool get_widget_snapshot(obs_source_t *widget, Snapshot &out);
 
 } // namespace vr

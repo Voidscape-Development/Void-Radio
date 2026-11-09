@@ -59,4 +59,28 @@ struct SnapResult {
 SnapResult snap(const Rect &rect, unsigned edges, float canvas_width, float canvas_height,
 		const std::vector<Rect> &others, float threshold, float min_size = 4.0f);
 
+/* Rounds the edges a drag moves onto a grid of `size` pixels. A move keeps the
+ * size and lands the top left corner on the grid. */
+Rect snap_to_grid(const Rect &rect, unsigned edges, float size, float min_size = 4.0f);
+
+/* The smallest rectangle holding all of `rects`. */
+Rect bounds_of(const std::vector<Rect> &rects);
+
+enum class Align {
+	Left,
+	HorizontalCenter,
+	Right,
+	Top,
+	VerticalCenter,
+	Bottom,
+};
+
+/* Lines up `rects` along one edge or centre line of `target`: the selection's
+ * own bounds when several are lined up, or the widget when it is one. */
+std::vector<Rect> align_rects(const std::vector<Rect> &rects, Align how, const Rect &target);
+
+/* Spaces `rects` out evenly between the outermost two, left to right or top to
+ * bottom, leaving equal gaps. The outermost two stay where they are. */
+std::vector<Rect> distribute_rects(const std::vector<Rect> &rects, bool horizontal);
+
 } // namespace vr::editor

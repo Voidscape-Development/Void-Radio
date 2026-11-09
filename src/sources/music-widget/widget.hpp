@@ -430,6 +430,8 @@ struct MusicWidget {
 	std::mutex preview_mutex;
 	PreviewTrack preview;
 	bool replay_request = false; /* under preview_mutex */
+	Snapshot shown_snapshot;     /* under preview_mutex, for the editor */
+	bool have_shown = false;
 	Snapshot preview_snapshot;
 
 	/* Playback state as of the last tick. */
