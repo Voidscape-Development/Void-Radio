@@ -21,6 +21,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include <util/platform.h>
 
 #include "filters/music-info-filter.hpp"
+#include "filters/music-reactive-filter.hpp"
 #include "integrations/websocket.hpp"
 #include "music/loudness-scan.hpp"
 #include "music/music-source.hpp"
@@ -67,6 +68,7 @@ bool obs_module_load(void)
 	vr::register_music_source();
 	vr::register_progress_bar_source();
 	vr::register_music_info_filter();
+	vr::register_music_reactive_filter();
 
 #ifdef VOID_RADIO_ENABLE_WIDGET
 	vr::register_music_widget_source();

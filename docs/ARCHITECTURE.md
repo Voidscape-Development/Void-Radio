@@ -60,6 +60,26 @@ Three things change the music's level on its way out, each where it can be teste
   keeps only the block's peak in an atomic; the engine takes it once per block and `Ducker`
   (`src/music/ducker.cpp`, pure) turns it into a gain moving at a steady rate in decibels.
 
+## The queue
+
+The queue lives in `Player`, as paths rather than indices, so reordering or reshuffling the
+playlist does not disturb it and a track that leaves the playlist leaves the queue
+(`set_entries()`). `take_following()` is the one place that decides what plays next: repeat-one
+first, then the queue, then the playlist, which resumes from `resume_path_`, the track that was
+playing when the queue took over. `peek_following()` answers the same question without moving,
+for prefetching, crossfades, the untagged queue and `next_title`. The dock and obs-websocket
+address the queue by playlist index; `MusicSource` turns that into a path on the engine thread.
+
+## Music Reactive
+
+`src/filters/music-reactive-filter.cpp` taps the linked music source with an audio capture
+callback, like the widget's visualiser, and hands each tick's audio to `BeatDetector`
+(`src/audio/beat-detector.cpp`, pure). That splits the sound into bass and treble with two
+biquads, follows each band's level in 10 ms steps, and calls a beat when the bass rises sharply
+against the last few steps and tops the last hit as it dies away. The filter turns the chosen
+signal into one 0..1 drive, then draws its target through `music-reactive.effect` (brightness,
+tint, opacity) inside a transform for the size pulse and shake.
+
 ## Remote control
 
 `src/integrations/websocket.cpp` registers vendor requests with obs-websocket through libobs's
@@ -141,6 +161,7 @@ Other threads hand it work or read a published copy; they never reach in.
 | Art loader (widget) | cover decoding and blurring | a single request/result slot the widget polls |
 | OBS audio thread (widget visualiser) | nothing of ours | appending to the widget's audio ring under its mutex |
 | OBS audio thread (duck trigger) | nothing of ours | raising an atomic peak the engine takes each block |
+| OBS audio thread (Music Reactive) | nothing of ours | appending to the filter's pending audio under its mutex |
 | obs-websocket's threads | nothing of ours | the same posting and snapshot reads as the dock |
 | Layout editor preview (OBS graphics thread) | its render target and staging surface | a mutex-guarded copy of the last frame the editor's timer picks up |
 | OBS UI / graphics / hotkey threads | nothing of ours | posting commands, reading snapshots |
@@ -166,6 +187,7 @@ So when you add a transport feature, it goes in `Player` and is reached by posti
 | `src/audio/loudness.*`, `src/music/loudness-scan.*` | The loudness meter, measuring whole files, and the measurement cache. |
 | `src/music/ducker.*`, `music-source-duck.cpp` | Ducking: the gain computer, and binding to the trigger source. |
 | `src/integrations/websocket.*` | obs-websocket vendor requests and events. |
+| `src/filters/music-reactive-filter.*`, `src/audio/beat-detector.*` | The Music Reactive filter and the beat detector it uses. |
 | `src/sources/music-widget-source.cpp`, `src/sources/music-widget/` | The Music Widget. `widget.hpp` lists its element types and the few functions its files share; `widget-layout` and `widget-design` are the layouts, styles and designs described above; `widget-visualizer` and `spectrum` the visualiser; `widget-extras` the image, icon and glow; `widget-motion` the pop-in and entrances; `widget-palette` the album colour tones. |
 | `src/ui/widget-editor.*`, `editor-canvas.*`, `editor-snap.*` | The layout editor: canvas, layers, inspector, designs. |
 | `src/sources/progress-bar-source.cpp`, `src/render/bar-renderer.*` | The progress bar, also drawn inside the widget. |
@@ -229,12 +251,13 @@ So when you add a transport feature, it goes in `Player` and is reached by posti
 
 | Test | Covers | Needs |
 |---|---|---|
-| `player` | transport behaviour end to end, with fake decks, including volume levelling and skipping silence | nothing |
+| `player` | transport behaviour end to end, with fake decks, including the queue, volume levelling and skipping silence | nothing |
 | `decoder` | decoding, sample-exact seeks, the cover-art seek case, bad files | FFmpeg dev packages |
 | `tag` | tags in every container, ReplayGain, the technical details, measuring a file and the cache, cover art choice, sidecar art | FFmpeg dev packages |
 | `playlist`, `template` | play order; the now-playing template language | nothing |
 | `loudness` | the meter against EBU Tech 3341's reference points, gating, and weighting | nothing |
 | `ducker` | ducking depth, attack, hold and release | nothing |
+| `beat` | beats and tempo found in grooves loud, quiet and busy; held notes ignored; settling in silence | nothing |
 | `widget-layout` | every widget layout, and a sweep of sizes that checks nothing overlaps or spills | nothing |
 | `editor-snap` | the layout editor's snapping, grid, aligning and distributing | nothing |
 | `editor-canvas` | the editor's canvas driven by simulated mouse and keyboard input: selecting, group moves, the selection band, locking, zoom and the grid | Qt 6 |

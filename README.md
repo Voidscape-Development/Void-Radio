@@ -209,12 +209,39 @@ literal brackets and braces. A separate template can be set for when playback is
 Elapsed and total times can be formatted as `m:ss`, `mm:ss`, `h:mm:ss`, `hh:mm:ss`, or
 automatically (adding the hours field only once a track passes an hour).
 
+### Music Reactive
+
+A filter you add to any source - a webcam, a logo, an image, a whole scene - that makes it move
+with the music playing in a Music Source.
+
+* **Moves with** the beat (a sharp kick on each hit), the bass, the overall loudness, or the
+  treble. The continuous modes stretch between how quiet and how loud the music has recently
+  been, so a loudly mastered track still swings.
+* **Pulse the size** from the middle. Kept inside its box (the default), it rests a little smaller
+  and grows to full size on the beat, so nothing is ever cut off.
+* **Brighten**, **flash a colour**, **fade between beats**, and **shake**, in any combination,
+  each with its own amount.
+* Sensitivity, and how long each kick takes to settle back.
+
+Beats are found as sudden rises in the bass against the last few hundredths of a second, so a
+held bass note never fires however loud it is and a kick over a busy bass line still does. When
+the music is paused or stopped, the source settles back to rest.
+
 ### Now Playing dock
 
 Under **View → Docks → Now Playing**: pick a Music Source, see the current title and artist,
 scrub with the seek bar, and use the transport, shuffle and repeat controls. The playlist below
 can be reordered by dragging, played by double-clicking, and each track has a context menu for
-editing its title and artist or removing it from the list.
+playing it next, adding it to the queue, editing its title and artist, or removing it from the
+list.
+
+**The queue.** Queued tracks play before the playlist carries on, in the order they were queued,
+with "play next" jumping the line; once the queue runs out, the playlist carries on from where it
+was. An **Up next** list above the playlist shows the queue: drag to reorder it, right-click to
+move a track to the top or take it out, or clear it. Queued tracks are marked in the playlist,
+and `{next_title}`, `{next_artist}` and the widget's up-next lines follow the queue. Repeat-one
+keeps repeating until you skip; previous from a queued track goes back to where the queue began.
+The queue lasts for the session and is not saved with the scene collection.
 
 ### Remote control (obs-websocket)
 
@@ -227,12 +254,15 @@ and anything else that speaks obs-websocket can drive the music. Send them with
 |---|---|---|
 | `GetMusicSources` | | Lists every music source with what it is playing |
 | `GetNowPlaying` | | State, title, artist, album, position, length, playlist position, next track |
-| `GetPlaylist` | | Every entry, the current index, shuffle and repeat |
+| `GetPlaylist` | | Every entry, the current index, the queue, shuffle and repeat |
 | `Play`, `Pause`, `TogglePause`, `Stop`, `Next`, `Previous`, `Restart` | | Transport |
 | `Seek` | `positionMs` | Moves within the track |
 | `PlayIndex` | `index` | Plays an entry, counting from 0 |
 | `SetShuffle` | `shuffle` (true/false) | |
 | `SetRepeat` | `mode` (`off`, `all`, `one`) | |
+| `PlayNext`, `AddToQueue` | `index` | Queues an entry at the front or the back |
+| `RemoveFromQueue` | `position` | Takes the entry at that place in the queue out, counting from 0 |
+| `ClearQueue` | | Empties the queue |
 
 Every request also takes an optional `sourceName` or `sourceUuid`; without one it goes to the
 first music source. Every response has `ok`, and `error` when it is false. For example, with

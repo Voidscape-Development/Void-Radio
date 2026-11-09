@@ -58,6 +58,8 @@ target_sources(
     src/audio/audio-decoder.cpp
     src/audio/audio-decoder.hpp
     src/audio/audio-format.hpp
+    src/audio/beat-detector.cpp
+    src/audio/beat-detector.hpp
     src/audio/deck.hpp
     src/audio/ffmpeg-util.cpp
     src/audio/loudness.cpp
@@ -69,6 +71,8 @@ target_sources(
     src/audio/stream-deck.hpp
     src/filters/music-info-filter.cpp
     src/filters/music-info-filter.hpp
+    src/filters/music-reactive-filter.cpp
+    src/filters/music-reactive-filter.hpp
     src/integrations/websocket.cpp
     src/integrations/websocket.hpp
     src/music/album-art.cpp
