@@ -178,11 +178,16 @@ Write a template using any of these fields:
 
 | | | | |
 |---|---|---|---|
-| `{title}` | `{artist}` | `{album}` | `{year}` |
-| `{genre}` | `{track}` | `{filename}` | `{path}` |
-| `{elapsed}` | `{duration}` | `{remaining}` | `{percent}` |
-| `{state}` | `{index}` | `{count}` | `{next_title}` |
-| `{next_artist}` | | | |
+| `{title}` | `{artist}` | `{album}` | `{album_artist}` |
+| `{year}` | `{genre}` | `{track}` | `{disc}` |
+| `{composer}` | `{comment}` | `{bpm}` | `{filename}` |
+| `{path}` | `{elapsed}` | `{duration}` | `{remaining}` |
+| `{percent}` | `{state}` | `{index}` | `{count}` |
+| `{position}` | `{next_title}` | `{next_artist}` | `{next_album}` |
+| `{codec}` | `{bitrate}` | `{samplerate}` | |
+
+`{position}` reads "3 / 12". `{codec}`, `{bitrate}` and `{samplerate}` describe the file itself
+("FLAC", "1024 kbps", "44.1 kHz"), so they are there even for an untagged track.
 
 Text wrapped in square brackets disappears when a field inside it is empty, so
 `{title}[ - {artist}]` loses the dash on an untagged track. Use `\[`, `\]`, `\{`, `\}` for

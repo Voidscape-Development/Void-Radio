@@ -6,6 +6,7 @@
 #include <util/platform.h>
 
 #include <dirent.h>
+#include <unistd.h>
 #include <sys/stat.h>
 
 #include <cstring>
@@ -33,6 +34,16 @@ int64_t os_get_file_size(const char *path)
 {
 	struct stat info;
 	return stat(path, &info) == 0 ? (int64_t)info.st_size : -1;
+}
+
+int os_rename(const char *old_path, const char *new_path)
+{
+	return rename(old_path, new_path);
+}
+
+int os_unlink(const char *path)
+{
+	return unlink(path);
 }
 
 bool os_file_exists(const char *path)

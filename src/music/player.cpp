@@ -19,6 +19,8 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include "music/player.hpp"
 
 #include <algorithm>
+#include <cmath>
+#include <cstring>
 
 namespace vr {
 
@@ -35,6 +37,26 @@ constexpr int64_t SEEK_FADE_MS = 15;
 /* Tracks still fading out under a crossfade. Rapid skipping would otherwise
  * stack them up without limit. */
 constexpr size_t MAX_OUTGOING = 3;
+
+/* Skipping silence: at most this much is skipped at the start of a track, and
+ * a track ends once this much of its last stretch has been quiet. Only the end
+ * of a track is watched, so a quiet passage in the middle never cuts it off. */
+constexpr int64_t MAX_LEAD_TRIM_MS = 15000;
+constexpr int64_t TAIL_WINDOW_MS = 30000;
+constexpr int64_t TAIL_QUIET_MS = 1500;
+
+/* How long a change of level takes, so a loudness that arrives mid-track is
+ * not a jump. */
+constexpr int64_t LEVEL_RAMP_MS = 400;
+
+/* How far levelling will go either way. */
+constexpr float MAX_CUT_DB = -24.0f;
+constexpr float MAX_BOOST_DB = 18.0f;
+
+float db_to_linear(float db)
+{
+	return std::pow(10.0f, db / 20.0f);
+}
 
 /* Stands in for a deck the factory could not make, so that failing to open a
  * file goes through exactly the same path as failing to decode one. */
@@ -75,6 +97,7 @@ void Player::set_settings(const PlayerSettings &settings)
 		entries_version_++;
 
 	settings_ = settings;
+	refresh_levels();
 }
 
 void Player::set_entries(std::vector<PlaylistEntry> entries)
@@ -102,12 +125,62 @@ void Player::set_tags(const std::string &path, const Tags &tags)
 	entry->tags = tags;
 	entry->tags_loaded = true;
 	entries_version_++;
+
+	refresh_levels(&path);
+}
+
+float Player::level_for(const Tags &tags) const
+{
+	if (settings_.level_mode == LevelMode::Off)
+		return 1.0f;
+
+	float loudness = tags.track_loudness;
+	float peak = tags.track_peak;
+
+	if (settings_.level_mode == LevelMode::Album && std::isfinite(tags.album_loudness)) {
+		loudness = tags.album_loudness;
+		if (tags.album_peak > 0.0f)
+			peak = tags.album_peak;
+	}
+
+	if (!std::isfinite(loudness))
+		return 1.0f;
+
+	const float db = std::clamp(settings_.level_target - loudness, MAX_CUT_DB, MAX_BOOST_DB);
+	float gain = db_to_linear(db);
+
+	/* Never louder than the track's own peak allows. */
+	if (settings_.level_no_clip && peak > 0.0f)
+		gain = std::min(gain, 1.0f / peak);
+
+	return gain;
+}
+
+void Player::refresh_levels(const std::string *path)
+{
+	const auto update = [this, path](Voice *voice) {
+		if (!voice || (path && voice->path != *path))
+			return;
+		const PlaylistEntry *entry = playlist_.at(playlist_.index_of(voice->path));
+		voice->level_target = entry ? level_for(entry->tags) : 1.0f;
+	};
+
+	update(current_.get());
+	update(prefetch_.get());
+	for (auto &voice : outgoing_)
+		update(voice.get());
 }
 
 std::string Player::next_untagged() const
 {
-	const auto wants_tags = [](const PlaylistEntry *entry) {
-		return entry && !entry->tags_loaded && !entry->url;
+	const bool measure = wants_measure();
+	const auto wants_tags = [measure](const PlaylistEntry *entry) {
+		if (!entry || entry->url)
+			return false;
+		if (!entry->tags_loaded)
+			return true;
+		return measure && !entry->tags.measuring && !entry->tags.loudness_checked &&
+		       !std::isfinite(entry->tags.track_loudness);
 	};
 
 	/* The playing track and the one after it first, so that what is on
@@ -251,6 +324,11 @@ void Player::seek(int64_t ms)
 	/* The track may now have further to run than the crossfade point. */
 	crossfade_started_ = false;
 
+	/* A seek lands where it was asked to, silence or not. */
+	current_->trim_lead = false;
+	current_->quiet_frames = 0;
+	current_->ended_early = false;
+
 	GainEnvelope &gain = current_->gain;
 	if (transport_ == PlayState::Playing && pending_ == Pending::None && !gain.fading() && gain.target() >= 1.0) {
 		gain.set(0.0);
@@ -298,6 +376,9 @@ std::unique_ptr<Player::Voice> Player::make_voice(int entry_index)
 
 	if (!voice->deck)
 		voice->deck = std::make_unique<FailedDeck>();
+
+	voice->level = voice->level_target = level_for(entry->tags);
+	voice->trim_lead = settings_.trim_silence;
 
 	return voice;
 }
@@ -501,8 +582,102 @@ void Player::maybe_crossfade()
 
 bool Player::finished(const Voice &voice)
 {
+	if (voice.ended_early)
+		return true;
+
 	const Deck::State state = voice.deck->state();
 	return state == Deck::State::Ended || state == Deck::State::Failed;
+}
+
+size_t Player::trim_lead(Voice &voice, float *const *buffers, size_t frames, size_t got)
+{
+	const float threshold = db_to_linear(settings_.trim_threshold_db);
+	const uint64_t limit = ms_frames(MAX_LEAD_TRIM_MS);
+
+	/* Reads on through whatever the deck has buffered, so skipping a few
+	 * seconds of silence takes a block or two rather than a few seconds. */
+	while (got > 0) {
+		size_t first = got;
+		for (size_t i = 0; i < got && first == got; i++) {
+			for (uint32_t ch = 0; ch < format_.channels; ch++) {
+				if (std::fabs(buffers[ch][i]) > threshold) {
+					first = i;
+					break;
+				}
+			}
+		}
+
+		if (first < got) {
+			if (first > 0) {
+				for (uint32_t ch = 0; ch < format_.channels; ch++)
+					std::memmove(buffers[ch], buffers[ch] + first, (got - first) * sizeof(float));
+			}
+			voice.trim_lead = false;
+			return got - first;
+		}
+
+		voice.lead_dropped += got;
+		if (voice.lead_dropped >= limit) {
+			/* Long enough to be on purpose: play it after all. */
+			voice.trim_lead = false;
+			return 0;
+		}
+
+		got = voice.deck->read(buffers, frames);
+	}
+
+	return 0;
+}
+
+void Player::watch_tail(Voice &voice, float *const *buffers, size_t got)
+{
+	const int64_t duration = voice.deck->duration_ms();
+	if (duration <= 0 || voice.deck->position_ms() < duration - TAIL_WINDOW_MS)
+		return;
+
+	const float threshold = db_to_linear(settings_.trim_threshold_db);
+
+	float peak = 0.0f;
+	for (uint32_t ch = 0; ch < format_.channels; ch++)
+		for (size_t i = 0; i < got; i++)
+			peak = std::max(peak, std::fabs(buffers[ch][i]));
+
+	if (peak > threshold) {
+		voice.quiet_frames = 0;
+		return;
+	}
+
+	voice.quiet_frames += got;
+	if (voice.quiet_frames >= ms_frames(TAIL_QUIET_MS))
+		voice.ended_early = true;
+}
+
+void Player::apply_level(Voice &voice, float *const *buffers, size_t got)
+{
+	const float start = voice.level;
+	/* Settles within about LEVEL_RAMP_MS, smoothly, however the blocks
+	 * fall. */
+	const float tau = (float)std::max<uint64_t>(1, ms_frames(LEVEL_RAMP_MS)) / 4.0f;
+	float end = start + (voice.level_target - start) * (1.0f - std::exp(-(float)got / tau));
+	if (std::fabs(end - voice.level_target) < 1e-4f)
+		end = voice.level_target;
+
+	voice.level = end;
+
+	if (start == 1.0f && end == 1.0f)
+		return;
+
+	for (uint32_t ch = 0; ch < format_.channels; ch++) {
+		float *data = buffers[ch];
+		if (start == end) {
+			for (size_t i = 0; i < got; i++)
+				data[i] *= end;
+		} else {
+			const float step = (end - start) / (float)got;
+			for (size_t i = 0; i < got; i++)
+				data[i] *= start + step * (float)i;
+		}
+	}
 }
 
 size_t Player::mix_voice(Voice &voice, float *const *out, size_t offset, size_t frames)
@@ -515,10 +690,23 @@ size_t Player::mix_voice(Voice &voice, float *const *out, size_t offset, size_t 
 		buffers[ch] = scratch_[ch].data();
 	}
 
-	const size_t got = voice.deck->read(buffers, frames);
+	size_t got = voice.deck->read(buffers, frames);
+
+	if (voice.trim_lead) {
+		got = trim_lead(voice, buffers, frames, got);
+
+		/* Nothing to hear yet: a fade in waits for the sound to start
+		 * rather than running out over the silence. */
+		if (!got && voice.trim_lead)
+			return 0;
+	}
+
+	if (settings_.trim_silence && got)
+		watch_tail(voice, buffers, got);
 
 	voice.gain.apply(buffers, format_.channels, got);
 	voice.gain.advance(frames - got);
+	apply_level(voice, buffers, got);
 
 	for (uint32_t ch = 0; ch < format_.channels; ch++) {
 		float *dst = out[ch] + offset;

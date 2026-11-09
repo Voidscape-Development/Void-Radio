@@ -21,6 +21,8 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include "util/vr-util.hpp"
 
 #include <cctype>
+#include <cmath>
+#include <cstdlib>
 
 namespace vr {
 
@@ -119,7 +121,34 @@ std::string samplerate_label(const AVStream *audio)
 	return out + " kHz";
 }
 
+bool parse_float(const std::string &text, float &out)
+{
+	const std::string trimmed = trim(text);
+	if (trimmed.empty())
+		return false;
+
+	char *end = nullptr;
+	const double value = std::strtod(trimmed.c_str(), &end);
+	if (end == trimmed.c_str() || !std::isfinite(value))
+		return false;
+
+	out = (float)value;
+	return true;
+}
+
 } // namespace
+
+float loudness_from_replaygain(const std::string &gain)
+{
+	float value = 0.0f;
+	return parse_float(gain, value) ? -18.0f - value : NAN;
+}
+
+float loudness_from_r128(const std::string &gain)
+{
+	float value = 0.0f;
+	return parse_float(gain, value) ? -23.0f - value / 256.0f : NAN;
+}
 
 bool read_tags(const std::string &path, Tags &out)
 {
@@ -132,7 +161,20 @@ bool read_tags(const std::string &path, Tags &out)
 	if (!format)
 		return false;
 
-	const int audio_index = av_find_best_stream(format.get(), AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
+	/* The codec, rate and bit rate need a short look at the stream itself;
+	 * a quarter of a second is plenty and keeps a library scan quick. */
+	format->max_analyze_duration = AV_TIME_BASE / 4;
+	avformat_find_stream_info(format.get(), nullptr);
+
+	int audio_index = av_find_best_stream(format.get(), AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
+	if (audio_index < 0) {
+		for (unsigned i = 0; i < format->nb_streams; i++) {
+			if (format->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
+				audio_index = (int)i;
+				break;
+			}
+		}
+	}
 	const AVStream *audio = audio_index >= 0 ? format->streams[audio_index] : nullptr;
 
 	static const char *const TITLE[] = {"title", nullptr};
@@ -158,6 +200,28 @@ bool read_tags(const std::string &path, Tags &out)
 	out.comment = lookup(format.get(), audio, COMMENT);
 	out.bpm = track_number(lookup(format.get(), audio, BPM));
 	out.disc = track_number(lookup(format.get(), audio, DISC));
+
+	/* ReplayGain first, as the more common, then R128 (Opus). */
+	static const char *const RG_TRACK[] = {"replaygain_track_gain", nullptr};
+	static const char *const RG_ALBUM[] = {"replaygain_album_gain", nullptr};
+	static const char *const RG_TRACK_PEAK[] = {"replaygain_track_peak", nullptr};
+	static const char *const RG_ALBUM_PEAK[] = {"replaygain_album_peak", nullptr};
+	static const char *const R128_TRACK[] = {"r128_track_gain", nullptr};
+	static const char *const R128_ALBUM[] = {"r128_album_gain", nullptr};
+
+	out.track_loudness = loudness_from_replaygain(lookup(format.get(), audio, RG_TRACK));
+	if (std::isnan(out.track_loudness))
+		out.track_loudness = loudness_from_r128(lookup(format.get(), audio, R128_TRACK));
+
+	out.album_loudness = loudness_from_replaygain(lookup(format.get(), audio, RG_ALBUM));
+	if (std::isnan(out.album_loudness))
+		out.album_loudness = loudness_from_r128(lookup(format.get(), audio, R128_ALBUM));
+
+	float peak = 0.0f;
+	if (parse_float(lookup(format.get(), audio, RG_TRACK_PEAK), peak) && peak > 0.0f)
+		out.track_peak = peak;
+	if (parse_float(lookup(format.get(), audio, RG_ALBUM_PEAK), peak) && peak > 0.0f)
+		out.album_peak = peak;
 
 	out.codec = codec_label(audio);
 	out.bitrate = bitrate_label(format.get(), audio);

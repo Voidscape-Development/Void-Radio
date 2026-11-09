@@ -22,11 +22,14 @@ add_library(
   void-radio-testable
   STATIC
   "${VOID_RADIO_SRC}/audio/audio-decoder.cpp"
+  "${VOID_RADIO_SRC}/audio/loudness.cpp"
   "${VOID_RADIO_SRC}/audio/ffmpeg-util.cpp"
   "${VOID_RADIO_SRC}/audio/ring-buffer.cpp"
   "${VOID_RADIO_SRC}/audio/stream-deck.cpp"
   "${VOID_RADIO_SRC}/music/album-art.cpp"
+  "${VOID_RADIO_SRC}/music/ducker.cpp"
   "${VOID_RADIO_SRC}/music/gain-envelope.cpp"
+  "${VOID_RADIO_SRC}/music/loudness-scan.cpp"
   "${VOID_RADIO_SRC}/music/player.cpp"
   "${VOID_RADIO_SRC}/sources/music-widget/spectrum.cpp"
   "${VOID_RADIO_SRC}/sources/music-widget/widget-layout.cpp"
@@ -48,7 +51,7 @@ target_link_libraries(media-fixtures PUBLIC PkgConfig::FFMPEG)
 foreach(
   test_name
   IN
-  ITEMS tag playlist template player decoder widget-layout editor-snap spectrum palette
+  ITEMS tag playlist template player decoder widget-layout editor-snap spectrum palette loudness ducker
 )
   add_executable(${test_name}-tests "${test_name}-tests.cpp")
   target_link_libraries(${test_name}-tests PRIVATE void-radio-testable media-fixtures)

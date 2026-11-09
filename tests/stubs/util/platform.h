@@ -8,6 +8,10 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <sys/stat.h>
+
+/* As in libobs, everywhere but Windows. */
+#define os_stat stat
 
 extern "C" {
 
@@ -15,6 +19,8 @@ FILE *os_fopen(const char *path, const char *mode);
 int os_fseeki64(FILE *file, int64_t offset, int origin);
 int64_t os_get_file_size(const char *path);
 bool os_file_exists(const char *path);
+int os_rename(const char *old_path, const char *new_path);
+int os_unlink(const char *path);
 
 struct os_dirent {
 	char d_name[256];

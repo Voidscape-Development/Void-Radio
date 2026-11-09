@@ -60,6 +60,8 @@ target_sources(
     src/audio/audio-format.hpp
     src/audio/deck.hpp
     src/audio/ffmpeg-util.cpp
+    src/audio/loudness.cpp
+    src/audio/loudness.hpp
     src/audio/ffmpeg-util.hpp
     src/audio/ring-buffer.cpp
     src/audio/ring-buffer.hpp
@@ -70,13 +72,18 @@ target_sources(
     src/music/album-art.cpp
     src/music/album-art.hpp
     src/music/command-queue.hpp
+    src/music/ducker.cpp
+    src/music/ducker.hpp
     src/music/gain-envelope.cpp
     src/music/gain-envelope.hpp
     src/music/library-worker.cpp
     src/music/library-worker.hpp
+    src/music/loudness-scan.cpp
+    src/music/loudness-scan.hpp
     src/music/music-api.cpp
     src/music/music-api.hpp
     src/music/music-link.cpp
+    src/music/music-source-duck.cpp
     src/music/music-source-info.cpp
     src/music/music-source-settings.cpp
     src/music/music-source.cpp

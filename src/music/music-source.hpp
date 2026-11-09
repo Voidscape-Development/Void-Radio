@@ -19,6 +19,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #pragma once
 
 #include "music/command-queue.hpp"
+#include "music/ducker.hpp"
 #include "music/library-worker.hpp"
 #include "music/music-api.hpp"
 #include "music/player.hpp"
@@ -96,6 +97,13 @@ public:
 
 	obs_source_t *source() const { return self_; }
 
+	/* Whether the music is being turned down for the duck trigger right
+	 * now, and by how much, in decibels. For display. */
+	float duck_gain_db() const { return duck_db_.load(); }
+
+	/* Fills a property list with the sources that can trigger ducking. */
+	static void list_duck_sources(obs_property_t *list, obs_source_t *self);
+
 private:
 	/* Engine thread. */
 	void engine_thread();
@@ -104,6 +112,14 @@ private:
 	void request_tags();
 
 	void post(CommandQueue::Command command) { commands_.post(std::move(command)); }
+
+	/* Ducking. The trigger is bound by name, and rebound from the engine
+	 * thread if it is renamed, deleted or loaded after this source. */
+	void bind_duck_trigger(const std::string &name);
+	void unbind_duck_trigger();
+	void retry_duck_trigger();
+	void apply_duck(float *const *planes, size_t frames);
+	static void duck_capture(void *param, obs_source_t *source, const struct audio_data *audio, bool muted);
 
 	void write_setting_bool(const char *name, bool value);
 	void write_setting_int(const char *name, int64_t value);
@@ -149,6 +165,19 @@ private:
 	std::thread thread_;
 
 	std::unique_ptr<SourceHotkeys> hotkeys_;
+
+	/* Ducking: the binding is shared between the UI and engine threads;
+	 * the peak is written on OBS's audio thread and taken by the engine. */
+	std::mutex duck_mutex_;
+	std::string duck_name_;
+	obs_weak_source_t *duck_weak_ = nullptr;
+	std::atomic<float> duck_peak_{0.0f};
+	std::atomic<float> duck_db_{0.0f};
+
+	/* Engine thread. */
+	Ducker ducker_;
+	float duck_gain_ = 1.0f;
+	uint64_t duck_retry_frames_ = 0;
 };
 
 } // namespace vr

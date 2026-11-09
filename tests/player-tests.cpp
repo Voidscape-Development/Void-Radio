@@ -30,6 +30,8 @@ struct DeckScript {
 	int seek_lag_reads = 0; /* reads that return nothing after a seek */
 	bool report_duration = true;
 	bool seekable = true;
+	int64_t lead_silence_ms = 0; /* silent before the track's level starts */
+	int64_t tail_silence_ms = 0; /* silent for this long at the end */
 };
 
 class FakeDeck final : public vr::Deck {
@@ -64,8 +66,12 @@ public:
 		const size_t got = left <= 0 ? 0 : std::min<size_t>(frames, (size_t)left);
 
 		for (size_t ch = 0; ch < 2; ch++)
-			for (size_t i = 0; i < got; i++)
-				out[ch][i] = level_;
+			for (size_t i = 0; i < got; i++) {
+				const int64_t at = position_ + (int64_t)i;
+				const bool silent = at < script_.lead_silence_ms ||
+						    at >= script_.duration_ms - script_.tail_silence_ms;
+				out[ch][i] = silent ? 0.0f : level_;
+			}
 
 		position_ += (int64_t)got;
 		if (got)
@@ -421,6 +427,176 @@ int main()
 		rig.player.set_tags("/t/1", tags);
 		test::check_str("untagged: then next", rig.player.next_untagged(), "/t/2");
 		test::check_str("tag shows in snapshot", rig.snap().title, "One");
+	}
+
+	/* Volume levelling: a track 6 dB louder than the target is turned down
+	 * by 6 dB, from its first sample when its loudness is already known. */
+	{
+		vr::PlayerSettings settings;
+		settings.level_mode = vr::LevelMode::Track;
+		settings.level_target = -16.0f;
+		Rig rig(2, {}, settings);
+
+		vr::Tags tags;
+		tags.track_loudness = -10.0f;
+		rig.player.set_tags("/t/1", tags);
+		rig.player.play();
+
+		const auto out = rig.run(100);
+		check_near("level: down 6 dB from the start", out[0], std::pow(10.0, -6.0 / 20.0), 1e-4);
+		check_near("level: and stays there", out[99], std::pow(10.0, -6.0 / 20.0), 1e-4);
+	}
+
+	/* Loudness that turns up mid-track is ramped to, not jumped to. */
+	{
+		vr::PlayerSettings settings;
+		settings.level_mode = vr::LevelMode::Track;
+		settings.level_target = -16.0f;
+		Rig rig(2, {}, settings);
+		rig.player.play();
+		rig.run(100);
+
+		vr::Tags tags;
+		tags.track_loudness = -4.0f; /* 12 dB too loud */
+		rig.player.set_tags("/t/1", tags);
+
+		const auto out = rig.run(1000);
+		check_true("level: no jump", out[0] > 0.9f);
+		check_true("level: on its way", out[200] < 0.9f && out[200] > 0.25f);
+		check_near("level: arrives", out[900], std::pow(10.0, -12.0 / 20.0), 1e-3);
+	}
+
+	/* A quiet track is turned up, but never past its own peak. */
+	{
+		vr::PlayerSettings settings;
+		settings.level_mode = vr::LevelMode::Track;
+		settings.level_target = -16.0f;
+		vr::Player probe({RATE, 2, 0}, nullptr);
+		probe.set_settings(settings);
+
+		vr::Tags quiet;
+		quiet.track_loudness = -30.0f;
+		check_near("level: quiet track up 14 dB", probe.level_for(quiet), std::pow(10.0, 14.0 / 20.0), 1e-3);
+
+		quiet.track_peak = 0.5f;
+		check_near("level: capped by the peak", probe.level_for(quiet), 2.0, 1e-4);
+
+		settings.level_no_clip = false;
+		probe.set_settings(settings);
+		check_near("level: uncapped when asked", probe.level_for(quiet), std::pow(10.0, 14.0 / 20.0), 1e-3);
+
+		/* Album mode takes the album's loudness when there is one. */
+		settings.level_mode = vr::LevelMode::Album;
+		probe.set_settings(settings);
+		vr::Tags album;
+		album.track_loudness = -10.0f;
+		album.album_loudness = -16.0f;
+		check_near("level: album loudness used", probe.level_for(album), 1.0, 1e-4);
+		album.album_loudness = NAN;
+		check_near("level: falls back to the track", probe.level_for(album), std::pow(10.0, -6.0 / 20.0), 1e-4);
+
+		/* Unknown, or off: left alone. */
+		check_near("level: unknown left alone", probe.level_for(vr::Tags{}), 1.0, 1e-6);
+		settings.level_mode = vr::LevelMode::Off;
+		probe.set_settings(settings);
+		check_near("level: off", probe.level_for(album), 1.0, 1e-6);
+	}
+
+	/* Measuring is asked for once per file, and not while it is under way. */
+	{
+		vr::PlayerSettings settings;
+		settings.level_mode = vr::LevelMode::Track;
+		Rig rig(2, {}, settings);
+		rig.player.play();
+
+		vr::Tags tags;
+		tags.title = "One";
+		rig.player.set_tags("/t/1", tags);
+		test::check_str("measure: still wanted", rig.player.next_untagged(), "/t/1");
+
+		tags.measuring = true;
+		rig.player.set_tags("/t/1", tags);
+		test::check_str("measure: not while measuring", rig.player.next_untagged(), "/t/2");
+
+		tags.measuring = false;
+		tags.loudness_checked = true;
+		rig.player.set_tags("/t/1", tags);
+		test::check_str("measure: done once tried", rig.player.next_untagged(), "/t/2");
+
+		settings.level_measure = false;
+		rig.player.set_settings(settings);
+		vr::Tags plain;
+		rig.player.set_tags("/t/2", plain);
+		test::check_str("measure: off, nothing more to do", rig.player.next_untagged(), "");
+	}
+
+	/* Skipping silence: two seconds of it at the start are gone at once. */
+	{
+		DeckScript script;
+		script.lead_silence_ms = 2000;
+		vr::PlayerSettings settings;
+		settings.trim_silence = true;
+		Rig rig(2, script, settings);
+		rig.player.play();
+
+		const auto out = rig.run(50);
+		check_true("trim: sound within the first block", out[0] == 1.0f || out[9] == 1.0f);
+		check_true("trim: and from then on", all_equal(out, 10, 50, 1.0f));
+		check_true("trim: deck moved past the silence", rig.latest["/t/1"]->position_ms() > 2000);
+	}
+
+	/* Without it, the silence plays. */
+	{
+		DeckScript script;
+		script.lead_silence_ms = 2000;
+		Rig rig(2, script);
+		rig.player.play();
+		const auto out = rig.run(2100);
+		check_true("no trim: silence plays", all_equal(out, 0, 2000, 0.0f));
+		check_true("no trim: then the track", all_equal(out, 2000, 2100, 1.0f));
+	}
+
+	/* A track whose last 2.5 s are silent ends after 1.5 s of it. */
+	{
+		DeckScript script;
+		script.tail_silence_ms = 2500;
+		vr::PlayerSettings settings;
+		settings.trim_silence = true;
+		Rig rig(2, script, settings);
+		rig.player.play();
+
+		const auto out = rig.run(3500);
+		/* Sound to 1500, silence to 3000, then track 2. */
+		check_true("tail: plays to the silence", all_equal(out, 0, 1500, 1.0f));
+		check_true("tail: next track by 3000 ms", all_equal(out, 3010, 3500, 2.0f));
+		check("tail: moved on", rig.snap().index, 1);
+	}
+
+	/* A seek into silence lands there: nothing is skipped. */
+	{
+		DeckScript script;
+		script.lead_silence_ms = 2000;
+		vr::PlayerSettings settings;
+		settings.trim_silence = true;
+		Rig rig(2, script, settings);
+		rig.player.play();
+		rig.run(100);
+		rig.player.seek(500);
+		const auto out = rig.run(300);
+		check_true("seek into silence: stays silent", all_equal(out, 20, 300, 0.0f));
+	}
+
+	/* A long silent stretch in the middle of a track is left alone. */
+	{
+		DeckScript script;
+		script.duration_ms = 60000;
+		script.lead_silence_ms = 0;
+		vr::PlayerSettings settings;
+		settings.trim_silence = true;
+		Rig rig(2, script, settings);
+		rig.player.play();
+		rig.run(20000);
+		check("middle: still on track 1", rig.snap().index, 0);
 	}
 
 	return test::finish();

@@ -31,6 +31,13 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 
 namespace vr {
 
+/* Stored in settings; the numbers must not change. */
+enum class LevelMode {
+	Off = 0,
+	Track = 1, /* every track to the same loudness */
+	Album = 2, /* albums keep their own quiet and loud tracks, when tagged */
+};
+
 struct PlayerSettings {
 	RepeatMode repeat = RepeatMode::All;
 	bool shuffle = false;
@@ -39,6 +46,18 @@ struct PlayerSettings {
 	int fade_in_ms = 0;
 	int fade_out_ms = 0;
 	bool skip_on_error = true;
+
+	/* Volume levelling: each track is turned up or down towards the target
+	 * loudness, from its ReplayGain or R128 tags or, if allowed, measured. */
+	LevelMode level_mode = LevelMode::Off;
+	float level_target = -16.0f; /* LUFS */
+	bool level_measure = true;
+	bool level_no_clip = true;
+
+	/* Skipping silence: quiet audio before a track starts is skipped, and a
+	 * track whose last stretch has gone quiet ends there. */
+	bool trim_silence = false;
+	float trim_threshold_db = -50.0f;
 };
 
 /*
@@ -100,15 +119,34 @@ public:
 	 * is not interpolated. */
 	void fill_snapshot(Snapshot &out) const;
 
-	/* The next local file whose tags have not been read, preferring the
-	 * current entry and the one after it. Empty when there is none. */
+	/* The next local file whose tags have not been read, or that still needs
+	 * measuring for volume levelling, preferring the current entry and the
+	 * one after it. Empty when there is none. */
 	std::string next_untagged() const;
+
+	/* Whether tag reads should measure files whose tags give no loudness. */
+	bool wants_measure() const { return settings_.level_mode != LevelMode::Off && settings_.level_measure; }
+
+	/* The gain levelling gives a track with these tags under the current
+	 * settings, linear. 1 when levelling is off or the loudness unknown. */
+	float level_for(const Tags &tags) const;
 
 private:
 	struct Voice {
 		std::unique_ptr<Deck> deck;
 		std::string path;
 		GainEnvelope gain;
+
+		/* Volume levelling: where the gain is, and where it is going. A
+		 * loudness that arrives mid-track is ramped to, not jumped to. */
+		float level = 1.0f;
+		float level_target = 1.0f;
+
+		/* Skipping silence. */
+		bool trim_lead = false;
+		uint64_t lead_dropped = 0;
+		uint64_t quiet_frames = 0;
+		bool ended_early = false;
 	};
 
 	enum class Pending {
@@ -134,6 +172,13 @@ private:
 	 * `out` starting at `offset`. Returns how many samples it produced. */
 	size_t mix_voice(Voice &voice, float *const *out, size_t offset, size_t frames);
 	static bool finished(const Voice &voice);
+
+	/* Drops the silence at the start of a track, reading on until sound
+	 * starts. Returns how many samples are left in `buffers`. */
+	size_t trim_lead(Voice &voice, float *const *buffers, size_t frames, size_t got);
+	void watch_tail(Voice &voice, float *const *buffers, size_t got);
+	void apply_level(Voice &voice, float *const *buffers, size_t got);
+	void refresh_levels(const std::string *path = nullptr);
 
 	uint64_t ms_frames(int64_t ms) const { return ms_to_frames(ms, format_.sample_rate); }
 

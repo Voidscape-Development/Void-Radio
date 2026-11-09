@@ -122,7 +122,9 @@ MusicSource::MusicSource(obs_data_t *settings, obs_source_t *source) : self_(sou
 		[this](const std::string &path, const Tags &tags) {
 			post([this, path, tags]() {
 				player_->set_tags(path, tags);
-				if (tags_in_flight_ == path)
+				/* Tags handed over before measuring are followed by
+				 * the measured ones; the read is not done yet. */
+				if (tags_in_flight_ == path && !tags.measuring)
 					tags_in_flight_.clear();
 			});
 		});
@@ -140,6 +142,9 @@ MusicSource::MusicSource(obs_data_t *settings, obs_source_t *source) : self_(sou
 MusicSource::~MusicSource()
 {
 	hotkeys_.reset();
+
+	/* Before anything else goes, so OBS's audio thread cannot call in. */
+	unbind_duck_trigger();
 
 	/* The library goes first so that it cannot post into a queue nobody
 	 * will run; then the engine, which takes every deck with it. */
@@ -198,9 +203,12 @@ void MusicSource::output_block(size_t frames)
 		planes[ch] = block_[ch].data();
 
 	if (!player_->render(planes, frames)) {
+		apply_duck(nullptr, frames);
 		timeline_running_ = false;
 		return;
 	}
+
+	apply_duck(planes, frames);
 
 	const uint64_t now = os_gettime_ns();
 
@@ -274,7 +282,7 @@ void MusicSource::request_tags()
 
 	tags_in_flight_ = player_->next_untagged();
 	if (!tags_in_flight_.empty())
-		library_->read_tags_for(tags_in_flight_);
+		library_->read_tags_for(tags_in_flight_, player_->wants_measure());
 }
 
 /* -------------------------------------------------------------------------- */
