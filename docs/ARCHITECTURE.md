@@ -59,11 +59,44 @@ The layout editor (`src/ui/widget-editor.cpp`) works on the same layers:
 - `detach_to_free_placement()` writes those resolved boxes into each element's own settings and
   switches to free placement, so the first drag under an automatic layout moves nothing else.
 - `place_element()` stores a dragged box relative to the element's anchor.
+- `set_stacking()` rewrites the layer numbers when the layers list is reordered.
+
+Four elements are never arranged by a layout: the visualiser (`viz_`), the logo image (`img_`),
+the play state icon (`icon_`) and the art glow (`glow_`). `is_always_free()` names them. They keep
+their own anchor and offset under every layout, so moving one in the editor does not switch the
+widget to free placement, and `detach_to_free_placement()` leaves them alone.
+
+A named style dresses the panel, the art, the bar and each line. Each of them can opt out with
+`<prefix>custom` (`bg_custom`, `art_custom`, `bar_custom`, `t0_custom`...), and `resolve_settings()`
+then leaves that element's own settings alone. The editor sets that flag for you when you change
+something the style decides, copying in what the style was giving the element first, so nothing
+jumps.
+
+A design is everything about a widget's look without its music source. `export_design()` and
+`apply_design()` turn one into JSON and back; presets, export and import, and copying a design
+to another widget all go through them. `builtin_designs()` lists the ones that ship.
+
+Colours that follow the album colour can ask for a tone of it: the colour itself, a dark or light
+tone, or black or white chosen to read on it (`widget-palette.cpp`, pure arithmetic). Each tone
+is pushed until it reaches a 7:1 contrast with the text it is meant to carry.
+
+The visualiser taps the linked music source with `obs_source_add_audio_capture_callback`. OBS's
+audio thread mixes each block down to mono into a ring; the widget's tick copies the ring out and
+`Spectrum` (`spectrum.cpp`, pure arithmetic: a Hann window, a radix-2 FFT and log-spaced bands)
+turns it into levels. Paused audio stops arriving rather than going quiet, so the visualiser
+notices silence by the frame count standing still.
 
 The editor's canvas (`editor-canvas.cpp`) knows nothing about OBS: it shows a picture and
-rectangles and reports drags in widget pixels. Snapping is plain arithmetic in `editor-snap.cpp`.
-The preview comes from a main render callback that draws the widget into a texture each frame
-and copies it back for the canvas.
+rectangles and reports drags in widget pixels. Snapping, the grid, aligning and distributing are
+plain arithmetic in `editor-snap.cpp`. The preview comes from a main render callback that draws
+the widget into a texture each frame and copies it back for the canvas.
+
+The editor's inspector is a table of fields per element type (`fields_for()` in
+`widget-editor.cpp`), so adding an option to the editor is one line there.
+
+The editor's sample track (`set_widget_sample_track()`) makes the widget show a made-up track,
+with a generated cover, in place of its music source. It applies to the widget itself, so OBS's
+own preview and output show it too; the editor turns it off when it closes or switches widget.
 
 ## Threads, and who owns what
 
@@ -76,6 +109,7 @@ Other threads hand it work or read a published copy; they never reach in.
 | Deck decode thread (one per `StreamDeck`) | its `AudioDecoder` | a small mutex-guarded buffer the engine reads from |
 | Library worker | folder walking, tag reading | posting `set_entries` / `set_tags` commands |
 | Art loader (widget) | cover decoding and blurring | a single request/result slot the widget polls |
+| OBS audio thread (widget visualiser) | nothing of ours | appending to the widget's audio ring under its mutex |
 | Layout editor preview (OBS graphics thread) | its render target and staging surface | a mutex-guarded copy of the last frame the editor's timer picks up |
 | OBS UI / graphics / hotkey threads | nothing of ours | posting commands, reading snapshots |
 
@@ -97,8 +131,8 @@ So when you add a transport feature, it goes in `Player` and is reached by posti
 | `src/music/library-worker.*` | Folder scanning and tag reading off the engine thread. |
 | `src/music/music-api.*`, `music-link.cpp` | The public face other sources use: snapshot, entries, transport calls, and `MusicLink` for binding to a music source by name and UUID. |
 | `src/music/track-tags.*`, `album-art.*` | Tags and embedded/sidecar cover art via FFmpeg. |
-| `src/sources/music-widget-source.cpp`, `src/sources/music-widget/` | The Music Widget. `widget.hpp` lists its element types and the few functions its files share; `widget-layout` and `widget-design` are the layouts and styles described above. |
-| `src/ui/widget-editor.*`, `editor-canvas.*`, `editor-snap.*` | The drag-and-drop layout editor. |
+| `src/sources/music-widget-source.cpp`, `src/sources/music-widget/` | The Music Widget. `widget.hpp` lists its element types and the few functions its files share; `widget-layout` and `widget-design` are the layouts, styles and designs described above; `widget-visualizer` and `spectrum` the visualiser; `widget-extras` the image, icon and glow; `widget-motion` the pop-in and entrances; `widget-palette` the album colour tones. |
+| `src/ui/widget-editor.*`, `editor-canvas.*`, `editor-snap.*` | The layout editor: canvas, layers, inspector, designs. |
 | `src/sources/progress-bar-source.cpp`, `src/render/bar-renderer.*` | The progress bar, also drawn inside the widget. |
 | `src/filters/music-info-filter.*` | Writes now-playing text into a text source. |
 | `src/ui/now-playing-dock.*` | The Qt dock. |
@@ -128,6 +162,13 @@ So when you add a transport feature, it goes in `Player` and is reached by posti
   `tests/widget-layout-tests.cpp` (the sweep there checks it stays tidy at every size); a new
   style is a `StyleTokens` entry in `widget-design.cpp`. Both need an entry in the properties
   list and the editor's combo boxes.
+- **A built-in design**: `builtin_designs()` in `widget-design.cpp`; the design tests apply every
+  one of them.
+- **A new widget element**: its state in `widget.hpp`, defaults in `widget-defaults.cpp`, reading
+  and drawing in a file of its own, a `Kind` in `draw_elements()`, an entry in `element_boxes()`
+  so the editor sees it, and a row in the editor's `fields_for()`.
+- **A template field**: `lookup_field()` and `template_fields()` in `text-template.cpp`, plus a
+  `Field.<name>` string; the template test checks every listed field is known.
 
 ## Things that are easy to get wrong
 
@@ -158,9 +199,11 @@ So when you add a transport feature, it goes in `Player` and is reached by posti
 | `tag` | tags in every container, cover art choice, sidecar art | FFmpeg dev packages |
 | `playlist`, `template` | play order; the now-playing template language | nothing |
 | `widget-layout` | every widget layout, and a sweep of sizes that checks nothing overlaps or spills | nothing |
-| `editor-snap` | the layout editor's snapping | nothing |
-| `editor-canvas` | the editor's canvas driven by simulated mouse and keyboard input | Qt 6 |
-| `widget-design` | layouts and styles resolving into element settings; switching to free placement moves nothing; placing an element lands it where asked; migration | libobs |
+| `editor-snap` | the layout editor's snapping, grid, aligning and distributing | nothing |
+| `editor-canvas` | the editor's canvas driven by simulated mouse and keyboard input: selecting, group moves, the selection band, locking, zoom and the grid | Qt 6 |
+| `spectrum` | the visualiser's analysis: tones land in the right band, loudness maps onto levels, smoothing | nothing |
+| `palette` | the album colour tones, and that each reads against the text it carries | nothing |
+| `widget-design` | layouts and styles resolving into element settings; switching to free placement moves nothing; placing an element lands it where asked; migration; the extras, stacking, designs and every built-in design | libobs |
 | `obs-smoke` | the built plugin inside a real headless libobs | libobs, an X display |
 
 `README.md` has the commands. CI runs everything except `obs-smoke` on every push and pull

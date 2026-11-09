@@ -202,10 +202,10 @@ void draw_icon(MusicWidget *widget, PlayState state)
 void draw_glow(MusicWidget *widget)
 {
 	GlowElement &glow = widget->glow;
-	if (!glow.geometry.enabled || !widget->blur_texture)
+	if (!glow.geometry.enabled || !widget->glow_texture)
 		return;
 
-	draw_texture_box(widget, widget->blur_texture, glow.geometry, ArtFit::Cover, glow.corner_radius, glow.softness,
+	draw_texture_box(widget, widget->glow_texture, glow.geometry, ArtFit::Cover, glow.corner_radius, glow.softness,
 			 0xFFFFFFFF);
 }
 

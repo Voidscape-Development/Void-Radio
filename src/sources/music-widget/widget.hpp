@@ -356,6 +356,7 @@ struct DrawParams {
 	float border_width = 0.0f;
 	uint32_t border_color = 0;
 	float softness = 0.0f;
+	float shape_inset = 0.0f;
 
 	/* 0 colour, 1 gradient, 2 texture. */
 	int fill_mode = 0;
@@ -458,12 +459,16 @@ struct MusicWidget {
 
 	RgbaImage pending_art;
 	RgbaImage pending_blur;
+	RgbaImage pending_glow;
 	bool upload_art = false;
 	bool upload_blur = false;
+	bool upload_glow = false;
 	bool clear_art = false;
 
 	gs_texture_t *art_texture = nullptr;
 	gs_texture_t *blur_texture = nullptr;
+	gs_texture_t *glow_texture = nullptr;
+	uint32_t requested_glow = 0;
 
 	/* Taken from the cover art, unless the colour source is a fixed colour,
 	 * which then stands in for it everywhere. */

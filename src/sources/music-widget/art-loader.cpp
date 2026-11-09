@@ -154,6 +154,10 @@ ArtLoader::Result ArtLoader::process(const Request &request)
 	result.accent = decoded_accent_;
 	result.accent_valid = decoded_accent_valid_;
 
+	if (request.glow_size > 0)
+		result.have_glow =
+			blur_image(decoded_, request.glow_size, request.glow_size, 0.55f, 0.0f, 0.0f, result.glow);
+
 	if (request.want_blur && request.blur_width > 0 && request.blur_height > 0) {
 		result.have_blur = blur_image(decoded_, request.blur_width, request.blur_height, request.blur_strength,
 					      request.blur_darken, request.blur_desaturate, result.blur);

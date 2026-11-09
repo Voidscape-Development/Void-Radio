@@ -45,15 +45,21 @@ public:
 		float blur_strength = 0.0f;
 		float blur_darken = 0.0f;
 		float blur_desaturate = 0.0f;
+
+		/* A second, lighter blur for the glow element, framed like the
+		 * art itself rather than like the widget. */
+		uint32_t glow_size = 0;
 	};
 
 	struct Result {
 		RgbaImage art;
 		RgbaImage blur;
+		RgbaImage glow;
 		uint32_t accent = 0;
 		bool accent_valid = false;
 		bool have_art = false;
 		bool have_blur = false;
+		bool have_glow = false;
 	};
 
 	void start()

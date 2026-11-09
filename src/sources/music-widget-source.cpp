@@ -103,6 +103,9 @@ static void widget_destroy(void *data)
 	if (widget->blur_texture)
 		gs_texture_destroy(widget->blur_texture);
 
+	if (widget->glow_texture)
+		gs_texture_destroy(widget->glow_texture);
+
 	if (widget->previous)
 		gs_texture_destroy(widget->previous);
 
@@ -239,6 +242,11 @@ static void collect_art_result(MusicWidget *widget)
 		widget->pending_blur = std::move(result.blur);
 		widget->upload_blur = true;
 	}
+
+	if (result.have_glow) {
+		widget->pending_glow = std::move(result.glow);
+		widget->upload_glow = true;
+	}
 }
 
 static void request_art(MusicWidget *widget)
@@ -252,13 +260,23 @@ static void request_art(MusicWidget *widget)
 	const std::string path = (snapshot && !use_placeholder_only) ? snapshot->path : std::string();
 	const int sample = widget->sample_cover;
 
-	const bool want_blur = (widget->background.enabled && widget->background.type == BackgroundType::BlurredArt) ||
-			       widget->glow.geometry.enabled;
+	const bool want_blur = widget->background.enabled && widget->background.type == BackgroundType::BlurredArt;
+
+	/* The glow is blurred small and scaled up, which is both cheaper and
+	 * softer; its size only steps in sixty-fours so resizing the box does
+	 * not ask for a new one on every pixel. */
+	uint32_t glow_size = 0;
+	if (widget->glow.geometry.enabled) {
+		const float side = std::max(widget->glow.geometry.width, widget->glow.geometry.height);
+		glow_size = (uint32_t)std::clamp((int)std::ceil(side / 64.0f) * 64 / 2, 32, 256);
+	}
 
 	if (!widget->art_settings_dirty && path == widget->requested_path &&
-	    widget->art.placeholder == widget->requested_placeholder && sample == widget->requested_sample)
+	    widget->art.placeholder == widget->requested_placeholder && sample == widget->requested_sample &&
+	    glow_size == widget->requested_glow)
 		return;
 
+	widget->requested_glow = glow_size;
 	widget->requested_sample = sample;
 	widget->requested_path = path;
 	widget->requested_placeholder = widget->art.placeholder;
@@ -268,6 +286,7 @@ static void request_art(MusicWidget *widget)
 	request.path = path;
 	request.placeholder = widget->art.placeholder;
 	request.sample = sample;
+	request.glow_size = glow_size;
 	request.want_blur = want_blur;
 	request.blur_width = widget->width;
 	request.blur_height = widget->height;
@@ -444,6 +463,7 @@ static void widget_tick(void *data, float seconds)
 	/* Textures are only created here, on the graphics thread. */
 	if (widget->clear_art) {
 		destroy_texture(widget->art_texture);
+		destroy_texture(widget->glow_texture);
 		widget->clear_art = false;
 	}
 
@@ -459,6 +479,13 @@ static void widget_tick(void *data, float seconds)
 		widget->blur_texture = create_texture(widget->pending_blur);
 		widget->pending_blur.clear();
 		widget->upload_blur = false;
+	}
+
+	if (widget->upload_glow) {
+		destroy_texture(widget->glow_texture);
+		widget->glow_texture = create_texture(widget->pending_glow);
+		widget->pending_glow.clear();
+		widget->upload_glow = false;
 	}
 
 	refresh_palette(widget);

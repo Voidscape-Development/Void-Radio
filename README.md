@@ -42,29 +42,57 @@ Setting one up comes down to three choices:
   behind the text, a compact bar, or text only. Positions and sizes are worked out from the
   widget's size, so resizing the widget reflows the card instead of leaving elements where they
   were.
-* **Style.** Glass (the cover art blurred behind everything), Solid, Minimal, Outline or Vinyl (a
-  spinning record). A style sets the panel, corners, art shape, type and colours for the whole
-  card, with one font, one text size, and an accent colour taken from the album art or fixed.
+* **Style.** Glass (the cover art blurred behind everything), Solid, Minimal, Outline, Vinyl (a
+  spinning record), Neon (a glowing title and an accent border), Cassette (warm and retro) or
+  Ticker (a square strip in a dark tone of the album colour). A style sets the panel, corners,
+  art shape, type and colours for the whole card, with one font, one text size, and an accent
+  colour taken from the album art or fixed.
 * **Lines.** Up to four lines of template text on the main view, each with a role (title,
   subtitle, detail or time) that decides its size and colour. Two more lines are available in
   the advanced options.
 
 Everything else waits behind **Show advanced options**: spacing, art size and shape, corner
-radius, animations, and for each line and element the full set of options below. Any line can
-opt out of the style and be styled by hand, and the **Custom** style leaves every element's look
-to you.
+radius, animations, and for each line and element the full set of options below. Any line, and
+the panel, art and progress bar, can opt out of the style and keep its own look, and the
+**Custom** style leaves every element's look to you.
 
 **Free placement** lets you put each element exactly where you want it. Each one picks an anchor
 (one of the nine corners, edges or the centre) and is offset from there in pixels, so a
 right-anchored element follows the right edge when the widget is resized.
 
 The **layout editor** (from the widget's properties, or **Tools → Music Widget Layout Editor**)
-shows the widget as OBS draws it. Drag any element to move it, or a corner or edge to resize it;
-elements snap to the widget's edges and centre lines and to each other (hold Alt to stop
-snapping), arrow keys nudge, and Undo steps back. Dragging an element under an automatic layout
-switches the widget to free placement, starting from where everything already is, so nothing
-jumps. Under a style, a line's type follows the height of its box, so making a line taller
-makes its text bigger.
+shows the widget as OBS draws it.
+
+* **Moving things.** Drag any element to move it, or a corner or edge to resize it. Shift or
+  Ctrl click to select several, or drag across empty space to select everything the band
+  touches, then move them together. Elements snap to the widget's edges and centre lines and to
+  each other (hold Alt to stop snapping), or to a grid if you turn one on. Arrow keys nudge, by
+  ten with Shift. Buttons line the selection up along an edge or centre, or space three or more
+  out evenly; with one element selected they line it up with the widget.
+* **Zoom.** Ctrl and the scroll wheel zoom around the mouse, the wheel scrolls, the middle button
+  drags the view, and **Fit** puts it back.
+* **Layers.** The list beside the canvas runs front to back. Tick an element to show it, tick its
+  padlock to stop it being dragged by accident, and move it forwards or backwards with the
+  buttons underneath. The panel is listed too, so it can be styled and restacked.
+* **Inspector.** Below the layers: the selected element's position and size, then its own
+  options: a line's text and its text when idle, with a menu of every field and a preview of
+  what the line says right now; its font, colour, album colour tone, alignment and long text
+  handling; and the options of the art, bar, panel and extras. Changing something the style
+  decides makes that element keep its own look from then on, starting from what the style gave
+  it, so nothing jumps.
+* **Sample track.** Shows a made-up track with a cover, so the widget can be designed with
+  nothing playing; **Long titles** tries out how long text is handled, and **Replay track
+  change** plays the transition, pop-in and entrances again. OBS shows the sample track on that
+  widget too, until it is switched off or the editor is closed.
+* **Designs.** Built-in designs (a lower third, now and up next, a big cover with a visualiser,
+  a ticker, Neon, Cassette, and one that pops in on each track), designs of your own saved by
+  name, export to and import from a file, and copying this widget's design onto another. A
+  design never carries the music source, so it can be shared.
+* **Undo and Redo**, with typing into a box or dragging a slider counted as one step.
+
+Dragging an element under an automatic layout switches the widget to free placement, starting
+from where everything already is, so nothing jumps. Under a style, a line's type follows the
+height of its box, so making a line taller makes its text bigger.
 
 Widgets made before layouts and styles existed open on free placement and the Custom style, so
 they look exactly as they did.
@@ -90,6 +118,15 @@ The elements the widget draws:
   than carrying on with the last track's details.
 * **Progress bar**, the same one the standalone source draws, with all of its fill types,
   directions and animations.
+* **Audio visualiser**: bars, mirrored bars, a waveform, or a ring to put around the art, moving
+  with the music source's own sound. Bar count, gap, rounded ends, a second colour at the tips,
+  sensitivity, smoothing and frequency range.
+* **Album art glow**: the cover blurred inside a box of its own, to sit behind the art.
+* **Image**: a picture of your own, such as a channel logo.
+* **Play state icon**: play, pause or stop, all the time or only when the music is not playing.
+
+The visualiser, glow, image and icon are placed by hand under any layout, so adding one does not
+switch the widget to free placement.
 
 Long titles are handled per line: scroll them (looping with a gap, or running to the end and
 back with a pause), shrink the type until it fits, truncate with an ellipsis from either end or
@@ -97,10 +134,19 @@ the middle, or wrap onto more lines.
 
 The progress bar fill, any border, the panel and any line of text can be set to **follow the
 album colour**, which is sampled from the current cover, so the whole card re-themes itself with
-each track.
+each track. Anything that follows it can take a **tone** of it: the colour itself, a dark tone
+that white text reads on, a light tone that dark text reads on, or black or white, whichever
+stands out against it. A line's shadow can follow it too, which makes a glow.
+
+Templates can use `{album_artist}`, `{composer}`, `{comment}`, `{bpm}`, `{disc}`, `{codec}`,
+`{bitrate}`, `{samplerate}`, `{position}` ("3 / 12") and `{next_album}` as well as the fields the
+Music Info filter has always had.
 
 On a track change the card can cross-fade, slide across, fade out and back in, or swap
-instantly. When nothing is playing it can hide itself, show the placeholder image with the idle
+instantly. It can also be set to **show itself only when a track starts**: it comes in (fading,
+sliding from any side, or growing), stays up for as long as you choose, then goes again, and a
+hotkey brings it back. Its elements can **arrive one after another** as it does, fading,
+sliding or growing into place in reading order. When nothing is playing it can hide itself, show the placeholder image with the idle
 templates, or keep showing the last track — and pausing can be made to count as nothing playing
 too, which it does not by default, a paused track still being the current track. Keeping the
 last track on screen goes on using the playing templates for any line whose idle template is

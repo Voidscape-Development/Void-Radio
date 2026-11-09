@@ -25,6 +25,10 @@ uniform float4 border_color;
  * values turn the same rounded rectangle into a drop shadow. */
 uniform float softness;
 
+/* Pulls the shape in from the quad's edges, so a soft edge can fade out
+ * entirely inside the quad instead of being cut off half way. */
+uniform float shape_inset;
+
 uniform float fill_mode; /* 0 colour, 1 gradient, 2 texture */
 uniform float4 fill_color;
 uniform float4 fill_color2;

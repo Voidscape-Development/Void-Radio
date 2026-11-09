@@ -208,7 +208,9 @@ int font_size_of(obs_data_t *data, const std::string &key)
 
 void apply_panel(obs_data_t *out, const StyleTokens &t, double radius)
 {
-	obs_data_set_bool(out, "bg_enable", t.panel);
+	/* A style can leave the panel out, but never puts back one that has
+	 * been hidden. */
+	obs_data_set_bool(out, "bg_enable", t.panel && obs_data_get_bool(out, "bg_enable"));
 	obs_data_set_int(out, "bg_type", (int64_t)t.panel_type);
 	obs_data_set_int(out, "bg_color", t.panel_color);
 	obs_data_set_bool(out, "bg_accent", t.panel_accent);

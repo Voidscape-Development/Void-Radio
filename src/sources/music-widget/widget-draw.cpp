@@ -126,6 +126,7 @@ void draw_quad(gs_effect_t *effect, const DrawParams &params, bool sprite)
 	gs_effect_set_float(gs_effect_get_param_by_name(effect, "border_width"), params.border_width);
 	gs_effect_set_vec4(gs_effect_get_param_by_name(effect, "border_color"), &border);
 	gs_effect_set_float(gs_effect_get_param_by_name(effect, "softness"), params.softness);
+	gs_effect_set_float(gs_effect_get_param_by_name(effect, "shape_inset"), params.shape_inset);
 	gs_effect_set_float(gs_effect_get_param_by_name(effect, "fill_mode"), (float)params.fill_mode);
 	gs_effect_set_vec4(gs_effect_get_param_by_name(effect, "fill_color"), &color);
 	gs_effect_set_vec4(gs_effect_get_param_by_name(effect, "fill_color2"), &color2);
@@ -255,6 +256,7 @@ void draw_texture_box(MusicWidget *widget, gs_texture_t *texture, const Geometry
 	params.texture = texture;
 	params.corner_radius = corner_radius;
 	params.softness = softness;
+	params.shape_inset = softness > 0.0f ? softness * 0.5f + 1.0f : 0.0f;
 	params.opacity = geometry.opacity * widget->draw_opacity;
 	params.color = tint;
 

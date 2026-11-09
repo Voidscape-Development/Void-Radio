@@ -255,6 +255,21 @@ int main()
 		obs_data_release(settings);
 	}
 
+	/* A hidden panel stays hidden under a style that has one. */
+	{
+		obs_data_t *settings = new_widget("{\"layout\": 1, \"style\": 2, \"bg_enable\": false}");
+		obs_data_t *r = resolve_settings(settings);
+		check_true("hidden panel: stays hidden", !obs_data_get_bool(r, "bg_enable"));
+		obs_data_release(r);
+		obs_data_release(settings);
+
+		settings = new_widget("{\"layout\": 1, \"style\": 2}");
+		r = resolve_settings(settings);
+		check_true("panel: shown by default", obs_data_get_bool(r, "bg_enable"));
+		obs_data_release(r);
+		obs_data_release(settings);
+	}
+
 	/* An element keeping its own look is left alone by the style. */
 	{
 		obs_data_t *settings = new_widget("{\"style\": 2, \"bg_custom\": true, \"bg_color\": 4278255360,"
