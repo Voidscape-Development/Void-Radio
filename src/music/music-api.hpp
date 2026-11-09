@@ -57,6 +57,9 @@ bool is_music_source(obs_source_t *source);
 bool get_snapshot(obs_source_t *source, Snapshot &out);
 bool get_entries(obs_source_t *source, std::vector<EntryInfo> &out, int &current_index);
 
+/* The queue, in the order it will play: indices into the entries. */
+bool get_queue(obs_source_t *source, std::vector<int> &out);
+
 /* Transport control. */
 void transport_play(obs_source_t *source);
 void transport_pause(obs_source_t *source);
@@ -67,6 +70,13 @@ void transport_previous(obs_source_t *source);
 void transport_restart(obs_source_t *source);
 void transport_seek(obs_source_t *source, int64_t ms);
 void transport_play_index(obs_source_t *source, int index);
+
+/* The queue. `next` puts the track at the front ("play next"), otherwise
+ * at the back ("add to queue"). Positions count from the front, from 0. */
+void queue_entry(obs_source_t *source, int index, bool next);
+void unqueue_entry(obs_source_t *source, int position);
+void move_queued_entry(obs_source_t *source, int from, int to);
+void clear_queue(obs_source_t *source);
 
 /* Playlist and mode changes made from the dock. These write back to the
  * source settings so they survive a scene collection save. */

@@ -24,6 +24,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include "music/playlist.hpp"
 #include "music/snapshot.hpp"
 
+#include <deque>
 #include <functional>
 #include <memory>
 #include <string>
@@ -99,6 +100,20 @@ public:
 	void play_index(int index);
 
 	/*
+	 * The queue: tracks to play before the playlist carries on. "Play
+	 * next" puts a track at the front, "add to queue" at the back. Once
+	 * the queue has run out, playback carries on from where the playlist
+	 * was before the first queued track. Tracks are held by path, so
+	 * reordering or reshuffling the playlist does not disturb the queue,
+	 * and a track removed from the playlist leaves the queue too.
+	 */
+	void queue_track(const std::string &path, bool next);
+	void unqueue(size_t position);
+	void move_queued(size_t from, size_t to);
+	void clear_queue();
+	const std::deque<std::string> &queue() const { return queue_; }
+
+	/*
 	 * Renders `frames` samples into the planar buffers. Returns false when
 	 * there is nothing to output at all (stopped, or paused once any fade
 	 * out has finished); the buffers are silent then and should not be
@@ -168,6 +183,13 @@ private:
 	void maybe_prefetch();
 	void maybe_crossfade();
 
+	/* What plays after the current track, queue first. */
+	int peek_following() const;
+
+	/* Moves on to what plays next, taking it off the queue if it came
+	 * from there. Returns the entry, or -1 to stop. */
+	int take_following(RepeatMode repeat);
+
 	/* Reads up to `frames` from `voice`, applies its gain and adds it into
 	 * `out` starting at `offset`. Returns how many samples it produced. */
 	size_t mix_voice(Voice &voice, float *const *out, size_t offset, size_t frames);
@@ -203,6 +225,12 @@ private:
 	uint64_t gap_remaining_ = 0;
 
 	int consecutive_errors_ = 0;
+
+	std::deque<std::string> queue_;
+
+	/* The playlist track that was playing when the queue took over, for
+	 * the playlist to carry on from afterwards. Empty when it has not. */
+	std::string resume_path_;
 
 	std::vector<float> scratch_[MAX_MIX_CHANNELS];
 };

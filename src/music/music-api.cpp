@@ -45,6 +45,40 @@ bool get_entries(obs_source_t *source, std::vector<EntryInfo> &out, int &current
 	return true;
 }
 
+bool get_queue(obs_source_t *source, std::vector<int> &out)
+{
+	MusicSource *music = MusicSource::from_source(source);
+	if (!music)
+		return false;
+
+	music->queue(out);
+	return true;
+}
+
+void queue_entry(obs_source_t *source, int index, bool next)
+{
+	if (MusicSource *music = MusicSource::from_source(source))
+		music->queue_index(index, next);
+}
+
+void unqueue_entry(obs_source_t *source, int position)
+{
+	if (MusicSource *music = MusicSource::from_source(source))
+		music->unqueue(position);
+}
+
+void move_queued_entry(obs_source_t *source, int from, int to)
+{
+	if (MusicSource *music = MusicSource::from_source(source))
+		music->move_queued(from, to);
+}
+
+void clear_queue(obs_source_t *source)
+{
+	if (MusicSource *music = MusicSource::from_source(source))
+		music->clear_queue();
+}
+
 void transport_play(obs_source_t *source)
 {
 	if (MusicSource *music = MusicSource::from_source(source))

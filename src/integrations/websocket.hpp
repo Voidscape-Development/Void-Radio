@@ -31,7 +31,8 @@ namespace vr {
  *
  *   GetMusicSources, GetNowPlaying, GetPlaylist,
  *   Play, Pause, TogglePause, Stop, Next, Previous, Restart,
- *   Seek, PlayIndex, SetShuffle, SetRepeat
+ *   Seek, PlayIndex, SetShuffle, SetRepeat,
+ *   PlayNext, AddToQueue, RemoveFromQueue, ClearQueue
  *
  * Every request takes an optional "sourceName" (or "sourceUuid"); without one
  * it goes to the first music source there is. Every response carries "ok",

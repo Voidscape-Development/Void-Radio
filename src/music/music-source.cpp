@@ -274,9 +274,50 @@ void MusicSource::publish()
 		entries.push_back(std::move(info));
 	}
 
+	std::vector<int> queued;
+	for (const std::string &path : player_->queue()) {
+		const int index = player_->playlist().index_of(path);
+		if (index >= 0)
+			queued.push_back(index);
+	}
+
 	std::lock_guard<std::mutex> lock(entries_mutex_);
 	entries_ = std::move(entries);
 	current_index_ = player_->playlist().current();
+	queue_ = std::move(queued);
+}
+
+void MusicSource::queue(std::vector<int> &out) const
+{
+	std::lock_guard<std::mutex> lock(entries_mutex_);
+	out = queue_;
+}
+
+/* The queue is addressed by playlist index from outside, and turned into a
+ * path on the engine thread, where the list it indexes is. */
+void MusicSource::queue_index(int index, bool next)
+{
+	post([this, index, next]() {
+		if (const PlaylistEntry *entry = player_->playlist().at(index))
+			player_->queue_track(entry->path, next);
+	});
+}
+
+void MusicSource::unqueue(int position)
+{
+	if (position >= 0)
+		post([this, position]() { player_->unqueue((size_t)position); });
+}
+
+void MusicSource::move_queued(int from, int to)
+{
+	if (from >= 0 && to >= 0)
+		post([this, from, to]() { player_->move_queued((size_t)from, (size_t)to); });
+}
+
+void MusicSource::clear_queue()
+{
+	post([this]() { player_->clear_queue(); });
 }
 
 void MusicSource::request_tags()

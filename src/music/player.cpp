@@ -114,6 +114,112 @@ void Player::set_entries(std::vector<PlaylistEntry> entries)
 	playlist_.set_entries(std::move(entries));
 	playlist_.set_shuffle(settings_.shuffle);
 	entries_version_++;
+
+	/* Queued tracks that have left the playlist leave the queue. */
+	for (auto it = queue_.begin(); it != queue_.end();) {
+		if (playlist_.index_of(*it) < 0)
+			it = queue_.erase(it);
+		else
+			++it;
+	}
+	if (!resume_path_.empty() && playlist_.index_of(resume_path_) < 0)
+		resume_path_.clear();
+}
+
+void Player::queue_track(const std::string &path, bool next)
+{
+	if (playlist_.index_of(path) < 0)
+		return;
+
+	if (next)
+		queue_.push_front(path);
+	else
+		queue_.push_back(path);
+
+	entries_version_++;
+}
+
+void Player::unqueue(size_t position)
+{
+	if (position >= queue_.size())
+		return;
+
+	queue_.erase(queue_.begin() + (ptrdiff_t)position);
+	entries_version_++;
+}
+
+void Player::move_queued(size_t from, size_t to)
+{
+	if (from >= queue_.size() || to >= queue_.size() || from == to)
+		return;
+
+	const std::string path = queue_[from];
+	queue_.erase(queue_.begin() + (ptrdiff_t)from);
+	queue_.insert(queue_.begin() + (ptrdiff_t)to, path);
+	entries_version_++;
+}
+
+void Player::clear_queue()
+{
+	if (queue_.empty())
+		return;
+
+	queue_.clear();
+	entries_version_++;
+}
+
+int Player::peek_following() const
+{
+	if (settings_.repeat == RepeatMode::One && playlist_.current() >= 0)
+		return playlist_.current();
+
+	for (const std::string &path : queue_) {
+		const int index = playlist_.index_of(path);
+		if (index >= 0)
+			return index;
+	}
+
+	if (!resume_path_.empty())
+		return playlist_.peek_after(playlist_.index_of(resume_path_), settings_.repeat);
+
+	return playlist_.peek_next(settings_.repeat);
+}
+
+int Player::take_following(RepeatMode repeat)
+{
+	/* Repeating one track keeps repeating it; the queue waits. */
+	if (repeat == RepeatMode::One && playlist_.current() >= 0)
+		return playlist_.advance(repeat);
+
+	while (!queue_.empty()) {
+		const std::string path = queue_.front();
+		queue_.pop_front();
+		entries_version_++;
+
+		const int index = playlist_.index_of(path);
+		if (index < 0)
+			continue;
+
+		/* Remember where the playlist was, once, so it carries on from
+		 * there when the queue runs out. */
+		if (resume_path_.empty()) {
+			const PlaylistEntry *current = playlist_.at(playlist_.current());
+			if (current)
+				resume_path_ = current->path;
+		}
+
+		playlist_.set_current(index);
+		return index;
+	}
+
+	if (!resume_path_.empty()) {
+		const int resume = playlist_.index_of(resume_path_);
+		resume_path_.clear();
+		if (resume >= 0)
+			playlist_.set_current(resume);
+	}
+
+	return playlist_.advance(repeat);
 }
 
 void Player::set_tags(const std::string &path, const Tags &tags)
@@ -185,7 +291,7 @@ std::string Player::next_untagged() const
 
 	/* The playing track and the one after it first, so that what is on
 	 * screen fills in straight away. */
-	for (int candidate : {playlist_.current(), playlist_.peek_next(settings_.repeat)}) {
+	for (int candidate : {playlist_.current(), peek_following()}) {
 		const PlaylistEntry *entry = playlist_.at(candidate);
 		if (wants_tags(entry))
 			return entry->path;
@@ -293,6 +399,17 @@ void Player::next()
 
 void Player::previous()
 {
+	/* Back from a queued track goes back to the playlist track it took
+	 * over from. */
+	if (!resume_path_.empty()) {
+		const int resume = playlist_.index_of(resume_path_);
+		resume_path_.clear();
+		if (resume >= 0) {
+			start_entry(resume, manual_crossfade_ms());
+			return;
+		}
+	}
+
 	const int target = playlist_.step_back();
 	if (target >= 0)
 		start_entry(target, manual_crossfade_ms());
@@ -341,6 +458,8 @@ void Player::play_index(int index)
 	if (!playlist_.at(index))
 		return;
 
+	/* Picking a track by hand is where the playlist carries on from. */
+	resume_path_.clear();
 	start_entry(index, manual_crossfade_ms());
 }
 
@@ -444,7 +563,7 @@ void Player::advance(int crossfade_ms, bool user_initiated)
 	if (user_initiated && repeat == RepeatMode::One)
 		repeat = RepeatMode::All;
 
-	const int target = playlist_.advance(repeat);
+	const int target = take_following(repeat);
 
 	if (target < 0) {
 		if (user_initiated)
@@ -539,7 +658,7 @@ void Player::maybe_prefetch()
 	if (remaining > PREFETCH_MS + std::max(0, settings_.crossfade_ms))
 		return;
 
-	const int next = playlist_.peek_next(settings_.repeat);
+	const int next = peek_following();
 	const PlaylistEntry *entry = playlist_.at(next);
 
 	if (!entry)
@@ -568,7 +687,7 @@ void Player::maybe_crossfade()
 
 	/* The last track of a playlist that is not repeating plays out in full
 	 * rather than fading into nothing. */
-	if (playlist_.peek_next(settings_.repeat) < 0)
+	if (peek_following() < 0)
 		return;
 
 	advance((int)effective, false);
@@ -816,7 +935,7 @@ void Player::fill_snapshot(Snapshot &snapshot) const
 		snapshot.seekable = snapshot.duration_ms > 0 && current_ && current_->deck->seekable();
 	}
 
-	const PlaylistEntry *next_entry = playlist_.at(playlist_.peek_next(settings_.repeat));
+	const PlaylistEntry *next_entry = playlist_.at(peek_following());
 	if (next_entry) {
 		snapshot.next_title = next_entry->display_title();
 		snapshot.next_artist = next_entry->display_artist();

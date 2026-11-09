@@ -173,6 +173,31 @@ NowPlayingDock::NowPlayingDock(QWidget *parent) : QWidget(parent)
 	transportLayout->addWidget(repeatCombo_, 1);
 	layout->addLayout(transportLayout);
 
+	/* Up next: what has been queued, in the order it will play. Shown only
+	 * while something is queued. */
+	queueBox_ = new QWidget(this);
+	QVBoxLayout *queueLayout = new QVBoxLayout(queueBox_);
+	queueLayout->setContentsMargins(0, 0, 0, 0);
+	QHBoxLayout *queueHeader = new QHBoxLayout();
+	queueLabel_ = new QLabel(queueBox_);
+	QFont queueFont = queueLabel_->font();
+	queueFont.setBold(true);
+	queueLabel_->setFont(queueFont);
+	clearQueueButton_ = new QToolButton(queueBox_);
+	clearQueueButton_->setText(tr_text("Dock.Queue.Clear"));
+	clearQueueButton_->setAutoRaise(true);
+	queueHeader->addWidget(queueLabel_, 1);
+	queueHeader->addWidget(clearQueueButton_);
+	queueLayout->addLayout(queueHeader);
+	queueWidget_ = new QListWidget(queueBox_);
+	queueWidget_->setSelectionMode(QAbstractItemView::SingleSelection);
+	queueWidget_->setDragDropMode(QAbstractItemView::InternalMove);
+	queueWidget_->setContextMenuPolicy(Qt::CustomContextMenu);
+	queueWidget_->setMaximumHeight(140);
+	queueLayout->addWidget(queueWidget_);
+	queueBox_->setVisible(false);
+	layout->addWidget(queueBox_);
+
 	playlistWidget_ = new QListWidget(this);
 	playlistWidget_->setSelectionMode(QAbstractItemView::SingleSelection);
 	playlistWidget_->setDragDropMode(QAbstractItemView::InternalMove);
@@ -194,6 +219,9 @@ NowPlayingDock::NowPlayingDock(QWidget *parent) : QWidget(parent)
 	connect(playlistWidget_, &QListWidget::itemDoubleClicked, this, &NowPlayingDock::onEntryActivated);
 	connect(playlistWidget_, &QListWidget::customContextMenuRequested, this, &NowPlayingDock::onEntryMenu);
 	connect(playlistWidget_->model(), &QAbstractItemModel::rowsMoved, this, &NowPlayingDock::onPlaylistReordered);
+	connect(queueWidget_, &QListWidget::customContextMenuRequested, this, &NowPlayingDock::onQueueMenu);
+	connect(queueWidget_->model(), &QAbstractItemModel::rowsMoved, this, &NowPlayingDock::onQueueReordered);
+	connect(clearQueueButton_, &QToolButton::clicked, this, &NowPlayingDock::onClearQueue);
 
 	timer_ = new QTimer(this);
 	timer_->setInterval(REFRESH_INTERVAL_MS);
@@ -372,6 +400,7 @@ void NowPlayingDock::updatePlaylist()
 			shownPaths_.clear();
 			playlistWidget_->clear();
 		}
+		updateQueue({}, {});
 		return;
 	}
 
@@ -400,12 +429,16 @@ void NowPlayingDock::updatePlaylist()
 
 			QListWidgetItem *item = new QListWidgetItem(label, playlistWidget_);
 			item->setData(Qt::UserRole, QString::fromStdString(entry.path));
+			item->setData(Qt::UserRole + 1, label);
 			item->setToolTip(QString::fromStdString(entry.path));
 		}
 
 		shownPaths_ = paths;
 		updating_ = false;
 	}
+
+	std::vector<int> queue;
+	get_queue(source, queue);
 
 	for (int row = 0; row < playlistWidget_->count(); row++) {
 		QListWidgetItem *item = playlistWidget_->item(row);
@@ -416,8 +449,102 @@ void NowPlayingDock::updatePlaylist()
 			font.setBold(is_current);
 			item->setFont(font);
 		}
+
+		/* Where a track sits in the queue, if it is queued. */
+		QString label = item->data(Qt::UserRole + 1).toString();
+		for (size_t position = 0; position < queue.size(); position++) {
+			if (queue[position] == row) {
+				label += QStringLiteral("  ") + tr_text("Dock.Queued").arg((int)position + 1);
+				break;
+			}
+		}
+		if (item->text() != label)
+			item->setText(label);
 	}
 
+	updateQueue(entries, queue);
+
+	obs_source_release(source);
+}
+
+void NowPlayingDock::updateQueue(const std::vector<EntryInfo> &entries, const std::vector<int> &queue)
+{
+	queueBox_->setVisible(!queue.empty());
+
+	if (queue == shownQueue_)
+		return;
+
+	updating_ = true;
+	queueWidget_->clear();
+
+	for (int index : queue) {
+		if (index < 0 || (size_t)index >= entries.size())
+			continue;
+		const EntryInfo &entry = entries[(size_t)index];
+		QString label = QString::fromStdString(entry.title);
+		if (!entry.artist.empty())
+			label = QString::fromStdString(entry.artist) + QStringLiteral(" - ") + label;
+		QListWidgetItem *item = new QListWidgetItem(label, queueWidget_);
+		item->setToolTip(QString::fromStdString(entry.path));
+	}
+
+	queueLabel_->setText(tr_text("Dock.Queue").arg((int)queue.size()));
+	shownQueue_ = queue;
+	updating_ = false;
+}
+
+void NowPlayingDock::onQueueMenu(const QPoint &position)
+{
+	QListWidgetItem *item = queueWidget_->itemAt(position);
+	if (!item)
+		return;
+
+	const int row = queueWidget_->row(item);
+
+	QMenu menu(this);
+	QAction *top = menu.addAction(tr_text("Dock.Queue.ToTop"));
+	QAction *remove = menu.addAction(tr_text("Dock.Queue.Remove"));
+	top->setEnabled(row > 0);
+
+	QAction *chosen = menu.exec(queueWidget_->viewport()->mapToGlobal(position));
+	if (!chosen)
+		return;
+
+	obs_source_t *source = acquireSource();
+	if (!source)
+		return;
+
+	if (chosen == top)
+		move_queued_entry(source, row, 0);
+	else if (chosen == remove)
+		unqueue_entry(source, row);
+
+	obs_source_release(source);
+}
+
+void NowPlayingDock::onQueueReordered(const QModelIndex &, int start, int, const QModelIndex &, int row)
+{
+	if (updating_)
+		return;
+
+	obs_source_t *source = acquireSource();
+	if (!source)
+		return;
+
+	/* Qt gives the row the item was dropped above; once it has left its
+	 * old place, everything after shifts up by one. */
+	const int to = row > start ? row - 1 : row;
+	move_queued_entry(source, start, to);
+	obs_source_release(source);
+}
+
+void NowPlayingDock::onClearQueue()
+{
+	obs_source_t *source = acquireSource();
+	if (!source)
+		return;
+
+	clear_queue(source);
 	obs_source_release(source);
 }
 
@@ -532,6 +659,9 @@ void NowPlayingDock::onEntryMenu(const QPoint &position)
 
 	QMenu menu(this);
 	QAction *play = menu.addAction(tr_text("Dock.Play"));
+	QAction *playNext = menu.addAction(tr_text("Dock.PlayNext"));
+	QAction *addToQueue = menu.addAction(tr_text("Dock.AddToQueue"));
+	menu.addSeparator();
 	QAction *edit = menu.addAction(tr_text("Dock.EditInfo"));
 	menu.addSeparator();
 	QAction *remove = menu.addAction(tr_text("Dock.Remove"));
@@ -547,6 +677,15 @@ void NowPlayingDock::onEntryMenu(const QPoint &position)
 
 	if (chosen == edit) {
 		editEntry(row);
+		return;
+	}
+
+	if (chosen == playNext || chosen == addToQueue) {
+		obs_source_t *source = acquireSource();
+		if (!source)
+			return;
+		queue_entry(source, row, chosen == playNext);
+		obs_source_release(source);
 		return;
 	}
 

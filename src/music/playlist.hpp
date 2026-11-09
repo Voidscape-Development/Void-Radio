@@ -73,6 +73,9 @@ public:
 	/* Navigation returns an entry index, or -1 when playback should stop. */
 	int advance(RepeatMode mode);
 	int peek_next(RepeatMode mode) const;
+
+	/* What would follow `entry_index` in play order, without moving. */
+	int peek_after(int entry_index, RepeatMode mode) const;
 	int step_back();
 	int first() const;
 

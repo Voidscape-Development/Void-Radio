@@ -238,6 +238,24 @@ int Playlist::peek_next(RepeatMode mode) const
 	return mode == RepeatMode::All ? order_.front() : -1;
 }
 
+int Playlist::peek_after(int entry_index, RepeatMode mode) const
+{
+	if (order_.empty())
+		return -1;
+
+	if (mode == RepeatMode::One && at(entry_index))
+		return entry_index;
+
+	const auto it = std::find(order_.begin(), order_.end(), entry_index);
+	if (it == order_.end())
+		return order_.front();
+
+	if (it + 1 != order_.end())
+		return *(it + 1);
+
+	return mode == RepeatMode::All ? order_.front() : -1;
+}
+
 int Playlist::advance(RepeatMode mode)
 {
 	if (order_.empty())

@@ -203,9 +203,25 @@ void get_playlist(obs_data_t *request, obs_data_t *response, void *)
 	obs_data_set_string(response, "repeat", repeat_name((RepeatMode)obs_data_get_int(settings, "repeat")));
 	obs_data_release(settings);
 
+	std::vector<int> queue;
+	get_queue(source, queue);
+	obs_data_array_t *queued = obs_data_array_create();
+	for (int index : queue) {
+		obs_data_t *item = obs_data_create();
+		obs_data_set_int(item, "index", index);
+		if (index >= 0 && (size_t)index < entries.size()) {
+			obs_data_set_string(item, "title", entries[(size_t)index].title.c_str());
+			obs_data_set_string(item, "artist", entries[(size_t)index].artist.c_str());
+		}
+		obs_data_array_push_back(queued, item);
+		obs_data_release(item);
+	}
+
 	obs_data_set_string(response, "sourceName", obs_source_get_name(source));
 	obs_data_set_int(response, "currentIndex", current);
 	obs_data_set_array(response, "entries", array);
+	obs_data_set_array(response, "queue", queued);
+	obs_data_array_release(queued);
 	obs_data_array_release(array);
 	obs_data_set_bool(response, "ok", true);
 	obs_source_release(source);
@@ -261,6 +277,56 @@ void play_index(obs_data_t *request, obs_data_t *response, void *)
 	}
 
 	transport_play_index(source, (int)index);
+	obs_data_set_bool(response, "ok", true);
+	obs_source_release(source);
+}
+
+/* Queues the entry at "index", at the front or the back. */
+template<bool Next> void queue_request(obs_data_t *request, obs_data_t *response, void *)
+{
+	if (!obs_data_has_user_value(request, "index"))
+		return fail(response, "index is required");
+
+	std::string error;
+	obs_source_t *source = target_source(request, error);
+	if (!source)
+		return fail(response, error);
+
+	std::vector<EntryInfo> entries;
+	int current = -1;
+	get_entries(source, entries, current);
+
+	const long long index = obs_data_get_int(request, "index");
+	if (index < 0 || index >= (long long)entries.size()) {
+		obs_source_release(source);
+		return fail(response, "index is outside the playlist");
+	}
+
+	queue_entry(source, (int)index, Next);
+	obs_data_set_bool(response, "ok", true);
+	obs_source_release(source);
+}
+
+void unqueue_request(obs_data_t *request, obs_data_t *response, void *)
+{
+	if (!obs_data_has_user_value(request, "position"))
+		return fail(response, "position is required");
+
+	std::string error;
+	obs_source_t *source = target_source(request, error);
+	if (!source)
+		return fail(response, error);
+
+	std::vector<int> queue;
+	get_queue(source, queue);
+
+	const long long position = obs_data_get_int(request, "position");
+	if (position < 0 || position >= (long long)queue.size()) {
+		obs_source_release(source);
+		return fail(response, "position is outside the queue");
+	}
+
+	unqueue_entry(source, (int)position);
 	obs_data_set_bool(response, "ok", true);
 	obs_source_release(source);
 }
@@ -395,6 +461,10 @@ void register_websocket_vendor()
 		{"PlayIndex", play_index},
 		{"SetShuffle", set_shuffle_request},
 		{"SetRepeat", set_repeat_request},
+		{"PlayNext", queue_request<true>},
+		{"AddToQueue", queue_request<false>},
+		{"RemoveFromQueue", unqueue_request},
+		{"ClearQueue", transport<clear_queue>},
 	};
 
 	for (const auto &request : REQUESTS) {

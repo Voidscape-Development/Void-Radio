@@ -81,9 +81,15 @@ public:
 	void seek(int64_t ms);
 	void play_index(int index);
 
+	void queue_index(int index, bool next);
+	void unqueue(int position);
+	void move_queued(int from, int to);
+	void clear_queue();
+
 	/* Published state. Cheap, and safe from any thread. */
 	bool snapshot(Snapshot &out) const;
 	void entries(std::vector<EntryInfo> &out, int &current_index) const;
+	void queue(std::vector<int> &out) const;
 	int64_t media_time() const;
 	int64_t media_duration() const;
 	obs_media_state media_state() const;
@@ -158,6 +164,7 @@ private:
 	mutable std::mutex entries_mutex_;
 	std::vector<EntryInfo> entries_;
 	int current_index_ = -1;
+	std::vector<int> queue_;
 
 	std::unique_ptr<LibraryWorker> library_;
 

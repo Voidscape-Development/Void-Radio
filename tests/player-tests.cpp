@@ -599,5 +599,104 @@ int main()
 		check("middle: still on track 1", rig.snap().index, 0);
 	}
 
+	/* The queue: queued tracks come before the playlist carries on, in
+	 * order, and "play next" jumps the line. */
+	{
+		Rig rig(6);
+		rig.player.play();
+		rig.run(100);
+
+		rig.player.queue_track("/t/5", false);
+		rig.player.queue_track("/t/3", false);
+		rig.player.queue_track("/t/6", true); /* play next */
+		check("queue: three queued", (long long)rig.player.queue().size(), 3);
+		test::check_str("queue: up next is the play-next one", rig.snap().next_title, "6");
+
+		rig.player.next();
+		check("queue: play next first", rig.snap().index, 5);
+		rig.player.next();
+		check("queue: then in order", rig.snap().index, 4);
+		rig.player.next();
+		check("queue: then the last", rig.snap().index, 2);
+		check("queue: emptied as it plays", (long long)rig.player.queue().size(), 0);
+		test::check_str("queue: after it, the playlist resumes", rig.snap().next_title, "2");
+
+		/* The playlist carries on from track 1, where the queue began. */
+		rig.player.next();
+		check("queue: resumes after track 1", rig.snap().index, 1);
+	}
+
+	/* Queued tracks play when the current one ends by itself, too. */
+	{
+		DeckScript script;
+		script.duration_ms = 300;
+		Rig rig(4, script);
+		rig.player.play();
+		rig.player.queue_track("/t/4", false);
+		const auto out = rig.run(450);
+		check_true("queue: natural end moves to the queued track", all_equal(out, 310, 450, 4.0f));
+		check("queue: index", rig.snap().index, 3);
+	}
+
+	/* Repeat one keeps repeating; the queue waits for a skip. */
+	{
+		vr::PlayerSettings settings;
+		settings.repeat = vr::RepeatMode::One;
+		DeckScript script;
+		script.duration_ms = 300;
+		Rig rig(3, script, settings);
+		rig.player.play();
+		rig.player.queue_track("/t/3", false);
+		rig.run(450);
+		check("repeat one: still on track 1", rig.snap().index, 0);
+		rig.player.next();
+		check("repeat one: a skip takes the queued track", rig.snap().index, 2);
+	}
+
+	/* Removing, moving and clearing; tracks leaving the playlist leave the
+	 * queue; picking a track by hand forgets where to resume. */
+	{
+		Rig rig(5);
+		rig.player.play();
+		rig.player.queue_track("/t/2", false);
+		rig.player.queue_track("/t/3", false);
+		rig.player.queue_track("/t/4", false);
+
+		rig.player.move_queued(2, 0);
+		test::check_str("move: to the front", rig.player.queue().front(), "/t/4");
+		rig.player.unqueue(1);
+		check("unqueue: one fewer", (long long)rig.player.queue().size(), 2);
+		test::check_str("unqueue: the right one", rig.player.queue().back(), "/t/3");
+
+		std::vector<vr::PlaylistEntry> fewer;
+		for (const char *path : {"/t/1", "/t/2", "/t/4", "/t/5"}) {
+			vr::PlaylistEntry entry;
+			entry.path = path;
+			fewer.push_back(entry);
+		}
+		rig.player.set_entries(std::move(fewer));
+		check("removed track leaves the queue", (long long)rig.player.queue().size(), 1);
+
+		rig.player.queue_track("/t/9", false);
+		check("unknown track not queued", (long long)rig.player.queue().size(), 1);
+
+		rig.player.clear_queue();
+		check("clear", (long long)rig.player.queue().size(), 0);
+	}
+
+	/* Previous from a queued track goes back to where the queue began. */
+	{
+		Rig rig(5);
+		rig.player.play();
+		rig.player.next(); /* track 2 */
+		rig.player.queue_track("/t/5", false);
+		rig.player.next();
+		check("previous: on the queued track", rig.snap().index, 4);
+		rig.player.previous();
+		check("previous: back to track 2", rig.snap().index, 1);
+		rig.player.next();
+		check("previous: then on to track 3", rig.snap().index, 2);
+	}
+
 	return test::finish();
 }
