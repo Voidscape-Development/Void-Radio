@@ -68,6 +68,8 @@ static void set_text_defaults(obs_data_t *settings, int slot)
 	obs_data_set_default_string(settings, key_for(prefix, "idle_format").c_str(), slot == 0 ? "{state}" : "");
 	obs_data_set_default_bool(settings, key_for(prefix, "hide_empty").c_str(), true);
 	obs_data_set_default_bool(settings, key_for(prefix, "accent").c_str(), false);
+	obs_data_set_default_int(settings, key_for(prefix, "tone").c_str(), (int64_t)AccentTone::Accent);
+	obs_data_set_default_bool(settings, key_for(prefix, "shadow_accent").c_str(), false);
 	obs_data_set_default_double(settings, key_for(prefix, "rotation").c_str(), 0.0);
 
 	set_geometry_defaults(settings, prefix, enabled, Anchor::TopLeft, 200.0, slot == 0 ? 34.0 : 76.0, 410, 40, 10);
@@ -105,6 +107,80 @@ static void set_text_defaults(obs_data_t *settings, int slot)
 	obs_data_set_default_double(settings, key_for(prefix, "marquee_pause").c_str(), 1.0);
 }
 
+/* The extras are all off out of the box. */
+static void box_defaults(obs_data_t *settings, const std::string &prefix, Anchor anchor, double x, double y,
+			 int64_t width, int64_t height, int64_t z)
+{
+	obs_data_set_default_bool(settings, key_for(prefix, "enable").c_str(), false);
+	obs_data_set_default_int(settings, key_for(prefix, "anchor").c_str(), (int64_t)anchor);
+	obs_data_set_default_double(settings, key_for(prefix, "x").c_str(), x);
+	obs_data_set_default_double(settings, key_for(prefix, "y").c_str(), y);
+	obs_data_set_default_int(settings, key_for(prefix, "width").c_str(), width);
+	obs_data_set_default_int(settings, key_for(prefix, "height").c_str(), height);
+	obs_data_set_default_double(settings, key_for(prefix, "opacity").c_str(), 100.0);
+	obs_data_set_default_int(settings, key_for(prefix, "z").c_str(), z);
+}
+
+static void add_extras_defaults(obs_data_t *settings)
+{
+	box_defaults(settings, "img_", Anchor::TopRight, -16.0, 16.0, 96, 48, 30);
+	obs_data_set_default_int(settings, "img_fit", (int64_t)ArtFit::Contain);
+	obs_data_set_default_double(settings, "img_corner_radius", 0.0);
+	obs_data_set_default_string(settings, "img_path", "");
+
+	box_defaults(settings, "icon_", Anchor::TopRight, -16.0, 16.0, 28, 28, 30);
+	obs_data_set_default_int(settings, "icon_color", 0xFFFFFFFF);
+	obs_data_set_default_bool(settings, "icon_accent", false);
+	obs_data_set_default_int(settings, "icon_tone", (int64_t)AccentTone::Accent);
+	obs_data_set_default_int(settings, "icon_show", (int64_t)IconShow::Always);
+
+	/* Sits behind the art: art defaults to z 0. */
+	box_defaults(settings, "glow_", Anchor::MiddleLeft, 0.0, 0.0, 180, 180, -10);
+	obs_data_set_default_double(settings, "glow_opacity", 80.0);
+	obs_data_set_default_double(settings, "glow_corner_radius", 32.0);
+	obs_data_set_default_double(settings, "glow_softness", 20.0);
+}
+
+static void add_visualizer_defaults(obs_data_t *settings)
+{
+	obs_data_set_default_bool(settings, "viz_enable", false);
+	obs_data_set_default_int(settings, "viz_anchor", (int64_t)Anchor::BottomRight);
+	obs_data_set_default_double(settings, "viz_x", -16.0);
+	obs_data_set_default_double(settings, "viz_y", -16.0);
+	obs_data_set_default_int(settings, "viz_width", 160);
+	obs_data_set_default_int(settings, "viz_height", 48);
+	obs_data_set_default_double(settings, "viz_opacity", 100.0);
+	obs_data_set_default_int(settings, "viz_z", 5);
+
+	obs_data_set_default_int(settings, "viz_mode", (int64_t)VizMode::Bars);
+	obs_data_set_default_int(settings, "viz_bands", 24);
+	obs_data_set_default_double(settings, "viz_gap", 35.0);
+	obs_data_set_default_bool(settings, "viz_rounded", true);
+	obs_data_set_default_double(settings, "viz_line_width", 3.0);
+	obs_data_set_default_double(settings, "viz_ring_inner", 72.0);
+	obs_data_set_default_int(settings, "viz_color", 0xFFFFFFFF);
+	obs_data_set_default_int(settings, "viz_color2", 0xFFFFFFFF);
+	obs_data_set_default_bool(settings, "viz_gradient", false);
+	obs_data_set_default_bool(settings, "viz_accent", true);
+	obs_data_set_default_int(settings, "viz_tone", (int64_t)AccentTone::Accent);
+	obs_data_set_default_double(settings, "viz_sensitivity", 100.0);
+	obs_data_set_default_double(settings, "viz_smoothing", 60.0);
+	obs_data_set_default_double(settings, "viz_min_freq", 40.0);
+	obs_data_set_default_double(settings, "viz_max_freq", 14000.0);
+}
+
+static void add_motion_defaults(obs_data_t *settings)
+{
+	obs_data_set_default_int(settings, "popup_mode", (int64_t)PopupMode::Always);
+	obs_data_set_default_int(settings, "popup_animation", (int64_t)PopupAnimation::SlideUp);
+	obs_data_set_default_double(settings, "popup_hold", 8.0);
+	obs_data_set_default_int(settings, "popup_ms", 450);
+
+	obs_data_set_default_int(settings, "enter_style", (int64_t)EnterStyle::None);
+	obs_data_set_default_int(settings, "enter_ms", 450);
+	obs_data_set_default_int(settings, "enter_stagger_ms", 80);
+}
+
 void widget_defaults(obs_data_t *settings)
 {
 	obs_data_set_default_int(settings, "width", 640);
@@ -121,6 +197,9 @@ void widget_defaults(obs_data_t *settings)
 	obs_data_set_default_int(settings, "bg_color2", 0xC0303030);
 	obs_data_set_default_double(settings, "bg_gradient_angle", 90.0);
 	obs_data_set_default_bool(settings, "bg_accent", false);
+	obs_data_set_default_int(settings, "bg_tone", (int64_t)AccentTone::Accent);
+	obs_data_set_default_bool(settings, "bg_accent2", false);
+	obs_data_set_default_int(settings, "bg_tone2", (int64_t)AccentTone::Dark);
 	obs_data_set_default_double(settings, "bg_blur", 70.0);
 	obs_data_set_default_double(settings, "bg_darken", 45.0);
 	obs_data_set_default_double(settings, "bg_desaturate", 20.0);
@@ -159,6 +238,10 @@ void widget_defaults(obs_data_t *settings)
 
 	obs_data_set_default_double(settings, "bar_corner_radius", 5.0);
 	obs_data_set_default_int(settings, "bar_bg_color", 0x60FFFFFF);
+
+	add_extras_defaults(settings);
+	add_visualizer_defaults(settings);
+	add_motion_defaults(settings);
 
 	add_design_defaults(settings);
 }

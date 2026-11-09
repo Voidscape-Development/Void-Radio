@@ -48,4 +48,8 @@ struct TemplateContext {
  */
 std::string expand_template(const std::string &format, const TemplateContext &context);
 
+/* Every field expand_template knows, in the order a picker should offer them.
+ * The list ends with a null pointer. */
+const char *const *template_fields();
+
 } // namespace vr

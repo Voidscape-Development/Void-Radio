@@ -24,6 +24,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 namespace vr {
 
@@ -71,6 +72,7 @@ static void *widget_create(obs_data_t *settings, obs_source_t *source)
 
 	migrate_settings(settings);
 	widget_update(widget, settings);
+	register_motion_hotkey(widget);
 
 	return widget;
 }
@@ -78,6 +80,11 @@ static void *widget_create(obs_data_t *settings, obs_source_t *source)
 static void widget_destroy(void *data)
 {
 	MusicWidget *widget = static_cast<MusicWidget *>(data);
+
+	unregister_motion_hotkey(widget);
+	detach_audio(widget);
+	obs_weak_source_release(widget->tap.attached);
+	widget->tap.attached = nullptr;
 
 	widget->loader.stop();
 	widget->bar.destroy();
@@ -101,6 +108,8 @@ static void widget_destroy(void *data)
 
 	if (widget->background.image_valid)
 		vr_image_file_free(&widget->background.image);
+
+	destroy_extras(widget);
 
 	if (widget->composite)
 		gs_texrender_destroy(widget->composite);
@@ -182,7 +191,8 @@ static void refresh_text(MusicWidget *widget, TextElement &element)
 	const std::string next = expand_for(widget, element);
 
 	TextStyle style = element.style;
-	style.color = resolve_color(widget, style.color, element.follow_accent);
+	style.color = resolve_color(widget, style.color, element.follow_accent, element.tone);
+	style.shadow_color = resolve_color(widget, style.shadow_color, element.shadow_accent);
 
 	const uint32_t box_width = (uint32_t)std::max(1.0f, element.geometry.width);
 	const uint32_t box_height = (uint32_t)std::max(1.0f, element.geometry.height);
@@ -240,13 +250,16 @@ static void request_art(MusicWidget *widget)
 	const bool use_placeholder_only = widget->idle && widget->idle_mode == WidgetIdle::Placeholder;
 
 	const std::string path = (snapshot && !use_placeholder_only) ? snapshot->path : std::string();
+	const int sample = widget->sample_cover;
 
-	const bool want_blur = widget->background.enabled && widget->background.type == BackgroundType::BlurredArt;
+	const bool want_blur = (widget->background.enabled && widget->background.type == BackgroundType::BlurredArt) ||
+			       widget->glow.geometry.enabled;
 
 	if (!widget->art_settings_dirty && path == widget->requested_path &&
-	    widget->art.placeholder == widget->requested_placeholder)
+	    widget->art.placeholder == widget->requested_placeholder && sample == widget->requested_sample)
 		return;
 
+	widget->requested_sample = sample;
 	widget->requested_path = path;
 	widget->requested_placeholder = widget->art.placeholder;
 	widget->art_settings_dirty = false;
@@ -254,6 +267,7 @@ static void request_art(MusicWidget *widget)
 	ArtLoader::Request request;
 	request.path = path;
 	request.placeholder = widget->art.placeholder;
+	request.sample = sample;
 	request.want_blur = want_blur;
 	request.blur_width = widget->width;
 	request.blur_height = widget->height;
@@ -264,6 +278,73 @@ static void request_art(MusicWidget *widget)
 	widget->loader.request(request);
 }
 
+/* The editor's made-up track: two of them, so a track change can be shown,
+ * with a long-titled version of each for trying out the long text options. */
+static void fill_sample_snapshot(const PreviewTrack &preview, Snapshot &out)
+{
+	struct Sample {
+		const char *title;
+		const char *long_title;
+		const char *artist;
+		const char *album;
+		const char *year;
+		const char *genre;
+		const char *bpm;
+		int64_t duration_ms;
+	};
+
+	static const Sample SAMPLES[2] = {
+		{"Midnight Signal", "Midnight Signal (Extended Night Drive Mix) [Remastered Anniversary Edition]",
+		 "The Void Collective", "Static Bloom", "2026", "Synthwave", "118", 214000},
+		{"Low Orbit", "Low Orbit (Live from the Northern Frequencies Tour, Second Night, Encore)",
+		 "Aurora Lane", "Northern Frequencies", "2025", "Dream Pop", "96", 187000},
+	};
+
+	const Sample &now = SAMPLES[preview.serial % 2];
+	const Sample &next = SAMPLES[(preview.serial + 1) % 2];
+
+	out = Snapshot();
+	out.valid = true;
+	out.state = PlayState::Playing;
+	out.title = preview.long_text ? now.long_title : now.title;
+	out.artist = now.artist;
+	out.album = now.album;
+	out.album_artist = now.artist;
+	out.year = now.year;
+	out.genre = now.genre;
+	out.track = "3";
+	out.disc = "1";
+	out.bpm = now.bpm;
+	out.composer = now.artist;
+	out.codec = "FLAC";
+	out.bitrate = "1024 kbps";
+	out.samplerate = "44.1 kHz";
+	out.next_title = preview.long_text ? next.long_title : next.title;
+	out.next_artist = next.artist;
+	out.next_album = next.album;
+	out.index = 2;
+	out.count = 12;
+	out.duration_ms = now.duration_ms;
+	out.elapsed_ms = (int64_t)(std::fmod(preview.time, (float)now.duration_ms / 1000.0f) * 1000.0f);
+	out.progress = (float)out.elapsed_ms / (float)out.duration_ms;
+	out.seekable = true;
+	out.track_serial = preview.serial;
+}
+
+/* A track has started: the transition between the old card and the new, the
+ * pop-in and the entrances. */
+static void on_track_start(MusicWidget *widget)
+{
+	if (widget->transition != TrackTransition::None && widget->transition_seconds > 0.0f &&
+	    widget->previous_valid) {
+		widget->transitioning = true;
+		widget->transition_time = 0.0f;
+	}
+
+	trigger_popup(widget);
+	trigger_entrance(widget);
+}
+
 static void widget_tick(void *data, float seconds)
 {
 	MusicWidget *widget = static_cast<MusicWidget *>(data);
@@ -272,20 +353,43 @@ static void widget_tick(void *data, float seconds)
 	 * widget loaded before the source it points at still finds it. */
 	widget->link.tick(seconds);
 
+	bool preview_active = false;
+	bool replay = false;
+	{
+		std::lock_guard<std::mutex> lock(widget->preview_mutex);
+		PreviewTrack &preview = widget->preview;
+		preview_active = preview.active;
+		replay = widget->replay_request;
+		widget->replay_request = false;
+
+		if (preview_active) {
+			if (replay)
+				preview.serial++;
+			preview.time += seconds;
+			fill_sample_snapshot(preview, widget->preview_snapshot);
+		}
+
+		widget->sample_cover = preview_active ? (int)(preview.serial % 2) + 1 : 0;
+	}
+
 	widget->have_snapshot = false;
 
-	if (obs_source_t *source = widget->link.get()) {
+	if (preview_active) {
+		widget->snapshot = widget->preview_snapshot;
+		widget->have_snapshot = true;
+	} else if (obs_source_t *source = widget->link.get()) {
 		widget->have_snapshot = get_snapshot(source, widget->snapshot);
 		obs_source_release(source);
 	}
 
-	if (widget->have_snapshot && widget->snapshot.state != PlayState::Stopped) {
+	if (!preview_active && widget->have_snapshot && widget->snapshot.state != PlayState::Stopped) {
 		widget->frozen = widget->snapshot;
 		widget->have_frozen = true;
 	}
 
 	/* Decided before anything reads it: what the widget shows while idle is
 	 * chosen from the live state, not from the snapshot it settles on. */
+	const bool was_idle = widget->idle;
 	widget->idle = resolve_idle(widget);
 
 	const Snapshot *snapshot = effective_snapshot(widget);
@@ -296,16 +400,29 @@ static void widget_tick(void *data, float seconds)
 		if (!widget->have_serial) {
 			widget->have_serial = true;
 			widget->last_serial = snapshot->track_serial;
+			if (playing)
+				on_track_start(widget);
 		} else if (snapshot->track_serial != widget->last_serial) {
 			widget->last_serial = snapshot->track_serial;
-
-			if (widget->transition != TrackTransition::None && widget->transition_seconds > 0.0f &&
-			    widget->previous_valid) {
-				widget->transitioning = true;
-				widget->transition_time = 0.0f;
-			}
+			on_track_start(widget);
+		} else if (was_idle && playing) {
+			/* Starting again after a stop is a track starting too, as
+			 * far as showing the card goes. */
+			trigger_popup(widget);
+			trigger_entrance(widget);
 		}
 	}
+
+	if (replay && !preview_active)
+		on_track_start(widget);
+
+	/* With nothing playing, a card that only shows itself on track changes
+	 * gets out of the way straight off. */
+	if (widget->idle && widget->popup_mode == PopupMode::OnTrackChange &&
+	    widget->popup_time < widget->popup_seconds + widget->popup_hold)
+		widget->popup_time = std::max(widget->popup_time, widget->popup_seconds + widget->popup_hold);
+
+	tick_motion(widget, seconds);
 
 	if (widget->transitioning) {
 		widget->transition_time += seconds;
@@ -337,10 +454,15 @@ static void widget_tick(void *data, float seconds)
 		widget->upload_blur = false;
 	}
 
+	refresh_palette(widget);
+
 	uint32_t accent = 0;
 	const bool have_accent = current_accent(widget, accent);
 	widget->bar.set_accent(accent, have_accent);
 	widget->bar.tick(seconds, snapshot);
+
+	tick_extras(widget);
+	tick_visualizer(widget, seconds, playing, preview_active);
 
 	/* Art animation. */
 	ArtElement &art = widget->art;
@@ -372,6 +494,14 @@ static void widget_tick(void *data, float seconds)
 	}
 }
 
+static MusicWidget *widget_of(obs_source_t *source)
+{
+	const char *id = source ? obs_source_get_unversioned_id(source) : nullptr;
+	if (!id || strcmp(id, MUSIC_WIDGET_SOURCE_ID) != 0)
+		return nullptr;
+	return static_cast<MusicWidget *>(obs_obj_get_data(source));
+}
+
 } // namespace widget
 
 namespace {
@@ -379,6 +509,29 @@ namespace {
 struct obs_source_info music_widget_info = {};
 
 } // namespace
+
+void set_widget_sample_track(obs_source_t *source, bool active, bool long_text)
+{
+	widget::MusicWidget *widget = widget::widget_of(source);
+	if (!widget)
+		return;
+
+	std::lock_guard<std::mutex> lock(widget->preview_mutex);
+	if (active && !widget->preview.active)
+		widget->preview.time = 20.0f;
+	widget->preview.active = active;
+	widget->preview.long_text = long_text;
+}
+
+void replay_widget_track_change(obs_source_t *source)
+{
+	widget::MusicWidget *widget = widget::widget_of(source);
+	if (!widget)
+		return;
+
+	std::lock_guard<std::mutex> lock(widget->preview_mutex);
+	widget->replay_request = true;
+}
 
 void register_music_widget_source()
 {

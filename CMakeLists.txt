@@ -120,7 +120,14 @@ if(ENABLE_QT)
       src/sources/music-widget/widget-defaults.cpp
       src/sources/music-widget/widget-design.cpp
       src/sources/music-widget/widget-design.hpp
+      src/sources/music-widget/spectrum.cpp
+      src/sources/music-widget/spectrum.hpp
       src/sources/music-widget/widget-draw.cpp
+      src/sources/music-widget/widget-extras.cpp
+      src/sources/music-widget/widget-motion.cpp
+      src/sources/music-widget/widget-palette.cpp
+      src/sources/music-widget/widget-palette.hpp
+      src/sources/music-widget/widget-visualizer.cpp
       src/sources/music-widget/widget-layout.cpp
       src/sources/music-widget/widget-layout.hpp
       src/sources/music-widget/widget-properties.cpp

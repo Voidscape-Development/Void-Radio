@@ -619,6 +619,14 @@ void Player::fill_snapshot(Snapshot &snapshot) const
 		snapshot.genre = entry->tags.genre;
 		snapshot.year = entry->tags.year;
 		snapshot.track = entry->tags.track;
+		snapshot.album_artist = entry->tags.album_artist;
+		snapshot.composer = entry->tags.composer;
+		snapshot.comment = entry->tags.comment;
+		snapshot.bpm = entry->tags.bpm;
+		snapshot.disc = entry->tags.disc;
+		snapshot.codec = entry->tags.codec;
+		snapshot.bitrate = entry->tags.bitrate;
+		snapshot.samplerate = entry->tags.samplerate;
 		snapshot.seekable = !entry->url && snapshot.duration_ms > 0 && current_ && current_->deck->seekable();
 	}
 
@@ -626,6 +634,7 @@ void Player::fill_snapshot(Snapshot &snapshot) const
 	if (next_entry) {
 		snapshot.next_title = next_entry->display_title();
 		snapshot.next_artist = next_entry->display_artist();
+		snapshot.next_album = next_entry->tags.album;
 	}
 }
 

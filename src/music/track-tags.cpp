@@ -71,6 +71,54 @@ std::string track_number(const std::string &track)
 	return number.substr(first);
 }
 
+/* The short names FFmpeg gives codecs, as people expect to read them. */
+std::string codec_label(const AVStream *audio)
+{
+	if (!audio || !audio->codecpar)
+		return std::string();
+
+	const char *name = avcodec_get_name(audio->codecpar->codec_id);
+	if (!name || !*name)
+		return std::string();
+
+	std::string label = name;
+
+	/* PCM variants all read as WAV-style PCM; mp3float is still MP3. */
+	if (label.rfind("pcm_", 0) == 0)
+		return "PCM";
+	if (label.rfind("mp3", 0) == 0)
+		return "MP3";
+
+	for (char &c : label)
+		c = (char)std::toupper((unsigned char)c);
+	return label;
+}
+
+std::string bitrate_label(const AVFormatContext *format, const AVStream *audio)
+{
+	int64_t bits = audio && audio->codecpar ? audio->codecpar->bit_rate : 0;
+	if (bits <= 0)
+		bits = format->bit_rate;
+	if (bits <= 0)
+		return std::string();
+
+	return std::to_string((bits + 500) / 1000) + " kbps";
+}
+
+std::string samplerate_label(const AVStream *audio)
+{
+	const int rate = audio && audio->codecpar ? audio->codecpar->sample_rate : 0;
+	if (rate <= 0)
+		return std::string();
+
+	/* 44100 reads as 44.1 kHz, 48000 as 48 kHz. */
+	const int tenths = (rate + 50) / 100;
+	std::string out = std::to_string(tenths / 10);
+	if (tenths % 10)
+		out += "." + std::to_string(tenths % 10);
+	return out + " kHz";
+}
+
 } // namespace
 
 bool read_tags(const std::string &path, Tags &out)
@@ -93,6 +141,11 @@ bool read_tags(const std::string &path, Tags &out)
 	static const char *const GENRE[] = {"genre", nullptr};
 	static const char *const DATE[] = {"date", "year", "originaldate", "creation_time", nullptr};
 	static const char *const TRACK[] = {"track", "tracknumber", nullptr};
+	static const char *const ALBUM_ARTIST[] = {"album_artist", "albumartist", "album artist", nullptr};
+	static const char *const COMPOSER[] = {"composer", nullptr};
+	static const char *const COMMENT[] = {"comment", "description", nullptr};
+	static const char *const BPM[] = {"bpm", "TBPM", "tmpo", nullptr};
+	static const char *const DISC[] = {"disc", "discnumber", nullptr};
 
 	out.title = lookup(format.get(), audio, TITLE);
 	out.artist = lookup(format.get(), audio, ARTIST);
@@ -100,6 +153,15 @@ bool read_tags(const std::string &path, Tags &out)
 	out.genre = lookup(format.get(), audio, GENRE);
 	out.year = year_of(lookup(format.get(), audio, DATE));
 	out.track = track_number(lookup(format.get(), audio, TRACK));
+	out.album_artist = lookup(format.get(), audio, ALBUM_ARTIST);
+	out.composer = lookup(format.get(), audio, COMPOSER);
+	out.comment = lookup(format.get(), audio, COMMENT);
+	out.bpm = track_number(lookup(format.get(), audio, BPM));
+	out.disc = track_number(lookup(format.get(), audio, DISC));
+
+	out.codec = codec_label(audio);
+	out.bitrate = bitrate_label(format.get(), audio);
+	out.samplerate = samplerate_label(audio);
 
 	return !out.empty();
 }

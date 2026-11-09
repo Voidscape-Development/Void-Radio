@@ -46,6 +46,9 @@ enum class WidgetStyle {
 	Minimal = 3,
 	Outline = 4,
 	Vinyl = 5,
+	Neon = 6,
+	Cassette = 7,
+	Ticker = 8,
 };
 
 enum class ColorSource {
@@ -82,14 +85,66 @@ obs_data_t *resolve_settings(obs_data_t *settings);
 
 /* An element as it is drawn, for the layout editor. */
 struct ElementBox {
-	std::string prefix; /* "art_", "t0_" ... "t5_", "bar_" */
+	/* "bg_", "art_", "t0_" ... "t5_", "bar_", and the extras "viz_",
+	 * "img_", "icon_", "glow_". */
+	std::string prefix;
 	std::string label;
 	Box box;
 	bool enabled = false;
 	int z = 0;
+
+	/* Placed by hand under every layout: the extras are never arranged by
+	 * one, so moving them does not switch the widget to free placement. */
+	bool always_free = false;
+
+	/* The panel fills the widget and is not moved on the canvas. */
+	bool movable = true;
+
+	/* An editor setting only: a locked element is not dragged. */
+	bool locked = false;
 };
 
+/* Every element, panel first, in the order they are listed. */
 std::vector<ElementBox> element_boxes(obs_data_t *settings);
+
+/* True for the extras, which keep their own position under any layout. */
+bool is_always_free(const std::string &prefix);
+
+/* The z key an element's layer is stored under ("bg_z", "art_z" ...). */
+std::string z_key(const std::string &prefix);
+
+/*
+ * Restacks the elements: `order` lists prefixes from the back to the front,
+ * and each gets a layer number that keeps it there. Anything not listed keeps
+ * its layer.
+ */
+void set_stacking(obs_data_t *settings, const std::vector<std::string> &order);
+
+/* ------------------------------------------------------------------------- */
+/* Designs                                                                    */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * A design is everything about how a widget looks, without which music source
+ * it follows. Designs are what presets save, what export writes to a file and
+ * what "copy design" hands to another widget.
+ */
+
+/* The widget's design as JSON, wrapped so a file can be recognised as one. */
+std::string export_design(obs_data_t *settings);
+
+/* Replaces everything but the music source binding with the design in `json`,
+ * which may be wrapped by export_design or a bare settings object. Returns
+ * false, leaving `settings` alone, when the JSON cannot be read. */
+bool apply_design(obs_data_t *settings, const char *json);
+
+struct BuiltinDesign {
+	const char *name; /* a locale key */
+	std::string json;
+};
+
+/* The designs that ship with the plugin. */
+std::vector<BuiltinDesign> builtin_designs();
 
 /* Switches to Free placement, writing every element's current position and
  * size into its own fields first so that nothing moves. */

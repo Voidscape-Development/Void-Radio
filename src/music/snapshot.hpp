@@ -43,8 +43,18 @@ struct Snapshot {
 	std::string year;
 	std::string track;
 
+	std::string album_artist;
+	std::string composer;
+	std::string comment;
+	std::string bpm;
+	std::string disc;
+	std::string codec;
+	std::string bitrate;
+	std::string samplerate;
+
 	std::string next_title;
 	std::string next_artist;
+	std::string next_album;
 
 	int index = -1; /* zero based position of the current entry */
 	int count = 0;

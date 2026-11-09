@@ -30,10 +30,23 @@ struct Tags {
 	std::string year;
 	std::string track;
 
+	std::string album_artist;
+	std::string composer;
+	std::string comment;
+	std::string bpm;
+	std::string disc;
+
+	/* Technical details, read from the audio stream rather than the tags.
+	 * They do not count towards empty(): every file has them. */
+	std::string codec;      /* "FLAC", "MP3", "AAC" ... */
+	std::string bitrate;    /* "320 kbps", empty when unknown */
+	std::string samplerate; /* "44.1 kHz" */
+
 	bool empty() const
 	{
 		return title.empty() && artist.empty() && album.empty() && genre.empty() && year.empty() &&
-		       track.empty();
+		       track.empty() && album_artist.empty() && composer.empty() && comment.empty() && bpm.empty() &&
+		       disc.empty();
 	}
 };
 

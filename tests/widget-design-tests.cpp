@@ -15,6 +15,7 @@
 
 #include <cmath>
 #include <string>
+#include <vector>
 
 using namespace vr::widget;
 using test::check;
@@ -223,6 +224,131 @@ int main()
 		migrate_settings(fresh);
 		check("new widget: stays as it is", obs_data_get_int(fresh, "layout"), (long long)Arrangement::ArtLeft);
 		obs_data_release(fresh);
+	}
+
+	/* The new styles: Neon glows in the accent, Ticker's panel takes the
+	 * album colour's dark tone, Cassette sets its own cream text. */
+	{
+		obs_data_t *settings = new_widget("{\"style\": 6}");
+		obs_data_t *r = resolve_settings(settings);
+		check_true("neon: title glows", obs_data_get_bool(r, "t0_shadow"));
+		check_true("neon: glow follows the accent", obs_data_get_bool(r, "t0_shadow_accent"));
+		check_true("neon: border follows the accent", obs_data_get_bool(r, "bg_border_accent"));
+		check_true("neon: subtitle in a tone of the accent", obs_data_get_bool(r, "t1_accent"));
+		check("neon: subtitle in the light tone", obs_data_get_int(r, "t1_tone"), (long long)AccentTone::Light);
+		obs_data_release(r);
+		obs_data_release(settings);
+
+		settings = new_widget("{\"style\": 8}");
+		r = resolve_settings(settings);
+		check_true("ticker: panel follows the accent", obs_data_get_bool(r, "bg_accent"));
+		check("ticker: in the dark tone", obs_data_get_int(r, "bg_tone"), (long long)AccentTone::Dark);
+		check_near("ticker: square corners", obs_data_get_double(r, "bg_corner_radius"), 0.0, 0.001);
+		obs_data_release(r);
+		obs_data_release(settings);
+
+		settings = new_widget("{\"style\": 7}");
+		r = resolve_settings(settings);
+		check("cassette: cream title", obs_data_get_int(r, "t0_color"), 0xFFD8EEF6LL);
+		check_true("cassette: glow off", !obs_data_get_bool(r, "t0_shadow_accent"));
+		obs_data_release(r);
+		obs_data_release(settings);
+	}
+
+	/* An element keeping its own look is left alone by the style. */
+	{
+		obs_data_t *settings = new_widget("{\"style\": 2, \"bg_custom\": true, \"bg_color\": 4278255360,"
+						  " \"bar_custom\": true, \"bar_fg_color\": 4278190335}");
+		obs_data_t *r = resolve_settings(settings);
+		check("own look: panel colour kept", obs_data_get_int(r, "bg_color"), 4278255360LL);
+		check("own look: bar colour kept", obs_data_get_int(r, "bar_fg_color"), 4278190335LL);
+		check_true("own look: art still styled", obs_data_get_double(r, "art_corner_radius") > 0.0);
+		obs_data_release(r);
+		obs_data_release(settings);
+	}
+
+	/* The extras are placed by hand under any layout, and moving one does
+	 * not switch the widget to free placement. */
+	{
+		obs_data_t *settings = new_widget("{\"layout\": 1, \"viz_enable\": true}");
+		migrate_settings(settings);
+		std::vector<ElementBox> boxes = element_boxes(settings);
+		const ElementBox *viz = find(boxes, "viz_");
+		check_true("extras: visualiser listed", viz != nullptr);
+		check_true("extras: placed by hand", viz && viz->always_free);
+		check_true("extras: enabled", viz && viz->enabled);
+		const ElementBox *panel = find(boxes, "bg_");
+		check_true("extras: panel listed and fixed", panel && !panel->movable);
+
+		/* Bottom right, 16 px in: 640 - 16 - 160, 180 - 16 - 48. */
+		check_near("extras: anchored x", viz ? viz->box.x : -1, 464, 0.5);
+		check_near("extras: anchored y", viz ? viz->box.y : -1, 116, 0.5);
+
+		Box moved = viz->box;
+		moved.x -= 40;
+		place_element(settings, "viz_", moved);
+		check("extras: layout untouched", obs_data_get_int(settings, "layout"),
+		      (long long)Arrangement::ArtLeft);
+		check("extras: anchor kept", obs_data_get_int(settings, "viz_anchor"), (long long)Anchor::BottomRight);
+		check_near("extras: offset from its anchor", obs_data_get_double(settings, "viz_x"), -56, 0.5);
+
+		detach_to_free_placement(settings);
+		check("extras: anchor survives detaching", obs_data_get_int(settings, "viz_anchor"),
+		      (long long)Anchor::BottomRight);
+		obs_data_release(settings);
+	}
+
+	/* Stacking writes ascending layers in the order given. */
+	{
+		obs_data_t *settings = new_widget();
+		set_stacking(settings, {"bg_", "t0_", "art_"});
+		check_true("stacking: text under art",
+			   obs_data_get_int(settings, "t0_z") < obs_data_get_int(settings, "art_z"));
+		check_true("stacking: panel at the back",
+			   obs_data_get_int(settings, "bg_z") < obs_data_get_int(settings, "t0_z"));
+		obs_data_release(settings);
+	}
+
+	/* Designs: exported without the music source, applied over another
+	 * widget keeping that widget's own source. */
+	{
+		obs_data_t *a =
+			new_widget("{\"layout\": 1, \"music_source\": \"Music A\", \"style\": 4, \"width\": 777,"
+				   " \"t0_format\": \"{artist}\"}");
+		migrate_settings(a);
+		const std::string json = export_design(a);
+		check_true("design: marked as one", json.find("void_radio_widget_design") != std::string::npos);
+		check_true("design: no music source", json.find("Music A") == std::string::npos);
+
+		obs_data_t *b =
+			new_widget("{\"layout\": 1, \"music_source\": \"Music B\", \"style\": 1, \"t2_enable\": true}");
+		migrate_settings(b);
+		check_true("design: applied", apply_design(b, json.c_str()));
+		check("design: style copied", obs_data_get_int(b, "style"), 4);
+		check("design: size copied", obs_data_get_int(b, "width"), 777);
+		check_true("design: lines copied",
+			   std::string(obs_data_get_string(b, "t0_format")) == std::string("{artist}"));
+		check_true("design: old settings gone", !obs_data_get_bool(b, "t2_enable"));
+		check_true("design: own source kept",
+			   std::string(obs_data_get_string(b, "music_source")) == std::string("Music B"));
+
+		check_true("design: junk refused", !apply_design(b, "{\"hello\": 1}"));
+		check_true("design: not JSON refused", !apply_design(b, "not json"));
+		check("design: refused leaves it alone", obs_data_get_int(b, "width"), 777);
+
+		obs_data_release(a);
+		obs_data_release(b);
+	}
+
+	/* Every built-in design applies and lays out. */
+	for (const BuiltinDesign &design : builtin_designs()) {
+		obs_data_t *settings = new_widget();
+		const std::string label = std::string("builtin ") + design.name;
+		check_true((label + ": applies").c_str(), apply_design(settings, design.json.c_str()));
+		obs_data_t *r = resolve_settings(settings);
+		check_true((label + ": title on").c_str(), obs_data_get_bool(r, "t0_enable"));
+		obs_data_release(r);
+		obs_data_release(settings);
 	}
 
 	return test::finish();

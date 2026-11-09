@@ -217,15 +217,81 @@ bool current_accent(const MusicWidget *widget, uint32_t &color)
 	return widget->accent_valid;
 }
 
-uint32_t resolve_color(const MusicWidget *widget, uint32_t color, bool follow_accent)
+void refresh_palette(MusicWidget *widget)
+{
+	uint32_t accent = 0;
+	if (current_accent(widget, accent))
+		widget->palette = derive_palette(accent | 0xFF000000u);
+}
+
+uint32_t resolve_color(const MusicWidget *widget, uint32_t color, bool follow_accent, AccentTone tone)
 {
 	uint32_t accent = 0;
 	if (!follow_accent || !current_accent(widget, accent))
 		return color;
 
+	const uint32_t chosen = palette_tone(widget->palette, tone);
+
 	/* The accent replaces the colour but keeps whatever alpha was set, so
 	 * a translucent panel stays translucent. */
-	return (accent & 0x00FFFFFF) | (color & 0xFF000000);
+	return (chosen & 0x00FFFFFF) | (color & 0xFF000000);
+}
+
+void draw_texture_box(MusicWidget *widget, gs_texture_t *texture, const Geometry &geometry, ArtFit fit,
+		      float corner_radius, float softness, uint32_t tint)
+{
+	if (!texture)
+		return;
+
+	float x;
+	float y;
+	resolve_position(geometry, widget->width, widget->height, x, y);
+
+	float width = geometry.width;
+	float height = geometry.height;
+
+	DrawParams params;
+	params.fill_mode = 2;
+	params.texture = texture;
+	params.corner_radius = corner_radius;
+	params.softness = softness;
+	params.opacity = geometry.opacity * widget->draw_opacity;
+	params.color = tint;
+
+	const float texture_width = (float)gs_texture_get_width(texture);
+	const float texture_height = (float)gs_texture_get_height(texture);
+
+	if (texture_width > 0.0f && texture_height > 0.0f) {
+		const float source_aspect = texture_width / texture_height;
+		const float box_aspect = width / height;
+
+		if (fit == ArtFit::Cover) {
+			if (source_aspect > box_aspect) {
+				params.uv_scale_x = box_aspect / source_aspect;
+				params.uv_offset_x = (1.0f - params.uv_scale_x) * 0.5f;
+			} else if (source_aspect < box_aspect) {
+				params.uv_scale_y = source_aspect / box_aspect;
+				params.uv_offset_y = (1.0f - params.uv_scale_y) * 0.5f;
+			}
+		} else if (fit == ArtFit::Contain) {
+			if (source_aspect > box_aspect) {
+				const float fitted = width / source_aspect;
+				y += (height - fitted) * 0.5f;
+				height = fitted;
+			} else if (source_aspect < box_aspect) {
+				const float fitted = height * source_aspect;
+				x += (width - fitted) * 0.5f;
+				width = fitted;
+			}
+		}
+	}
+
+	params.x = x;
+	params.y = y;
+	params.width = width;
+	params.height = height;
+
+	draw_quad(widget->effect, params, false);
 }
 
 } // namespace vr::widget

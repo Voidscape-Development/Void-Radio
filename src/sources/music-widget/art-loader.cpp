@@ -19,6 +19,9 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include "sources/music-widget/art-loader.hpp"
 #include "music/album-art.hpp"
 
+#include <algorithm>
+#include <cmath>
+
 namespace vr::widget {
 
 namespace {
@@ -26,6 +29,57 @@ namespace {
 /* Cover art is never shown large enough to justify keeping the original
  * around, and the smaller copy makes the accent colour pass cheap. */
 constexpr uint32_t MAX_ART_DIMENSION = 1024;
+
+/* A cover for the sample track: a diagonal gradient with a soft sun, in one of
+ * two colour schemes so the two sample tracks look different. */
+RgbaImage sample_cover(int variant)
+{
+	constexpr uint32_t SIZE = 384;
+
+	struct Rgb {
+		float r, g, b;
+	};
+	const Rgb a = variant % 2 ? Rgb{0.95f, 0.30f, 0.55f} : Rgb{0.10f, 0.75f, 0.80f};
+	const Rgb b = variant % 2 ? Rgb{0.25f, 0.10f, 0.55f} : Rgb{0.05f, 0.15f, 0.45f};
+	const Rgb sun = variant % 2 ? Rgb{1.0f, 0.80f, 0.35f} : Rgb{0.85f, 1.0f, 0.95f};
+
+	RgbaImage image;
+	image.width = SIZE;
+	image.height = SIZE;
+	image.pixels.resize((size_t)SIZE * SIZE * 4);
+
+	for (uint32_t y = 0; y < SIZE; y++) {
+		for (uint32_t x = 0; x < SIZE; x++) {
+			const float u = (float)x / (SIZE - 1);
+			const float v = (float)y / (SIZE - 1);
+			const float t = (u + v) * 0.5f;
+
+			float r = a.r + (b.r - a.r) * t;
+			float g = a.g + (b.g - a.g) * t;
+			float bl = a.b + (b.b - a.b) * t;
+
+			const float dx = u - 0.62f;
+			const float dy = v - 0.38f;
+			const float d = dx * dx + dy * dy;
+			const float glow = d < 0.045f ? 1.0f : std::max(0.0f, 1.0f - (d - 0.045f) * 14.0f) * 0.5f;
+
+			/* Horizontal stripes across the lower half, for some texture. */
+			const float stripe = (v > 0.6f && ((int)(v * 40.0f) % 3 == 0)) ? 0.12f : 0.0f;
+
+			r = r + (sun.r - r) * glow - stripe;
+			g = g + (sun.g - g) * glow - stripe;
+			bl = bl + (sun.b - bl) * glow - stripe;
+
+			uint8_t *pixel = &image.pixels[((size_t)y * SIZE + x) * 4];
+			pixel[0] = (uint8_t)std::lround(std::clamp(r, 0.0f, 1.0f) * 255.0f);
+			pixel[1] = (uint8_t)std::lround(std::clamp(g, 0.0f, 1.0f) * 255.0f);
+			pixel[2] = (uint8_t)std::lround(std::clamp(bl, 0.0f, 1.0f) * 255.0f);
+			pixel[3] = 255;
+		}
+	}
+
+	return image;
+}
 
 } // namespace
 
@@ -59,9 +113,14 @@ ArtLoader::Result ArtLoader::process(const Request &request)
 {
 	Result result;
 
-	const std::string key = request.path + '\n' + request.placeholder;
+	const std::string key = request.path + '\n' + request.placeholder + '\n' + std::to_string(request.sample);
 
-	if (key != decoded_key_) {
+	if (key != decoded_key_ && request.sample) {
+		decoded_key_ = key;
+		decoded_ = sample_cover(request.sample);
+		decoded_accent_ = dominant_color(decoded_);
+		decoded_accent_valid_ = decoded_accent_ != 0;
+	} else if (key != decoded_key_) {
 		decoded_key_ = key;
 		decoded_.clear();
 

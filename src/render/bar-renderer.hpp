@@ -140,6 +140,9 @@ public:
 	uint32_t width() const { return width_; }
 	uint32_t height() const { return height_; }
 
+	/* Multiplies every layer's opacity, for a host fading the bar in. */
+	void set_opacity(float opacity) { opacity_ = opacity; }
+
 	/* Cover art accent, used by layers with `follow_accent` set. */
 	void set_accent(uint32_t color, bool valid);
 
@@ -186,6 +189,7 @@ private:
 
 	uint32_t accent_ = 0;
 	bool accent_valid_ = false;
+	float opacity_ = 1.0f;
 
 	/* Animation state. */
 	uint64_t last_serial_ = 0;

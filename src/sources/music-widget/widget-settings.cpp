@@ -161,6 +161,9 @@ void widget_update(void *data, obs_data_t *raw_settings)
 	background.color2 = (uint32_t)obs_data_get_int(settings, "bg_color2");
 	background.gradient_angle = (float)obs_data_get_double(settings, "bg_gradient_angle");
 	background.follow_accent = obs_data_get_bool(settings, "bg_accent");
+	background.tone = (AccentTone)obs_data_get_int(settings, "bg_tone");
+	background.follow_accent2 = obs_data_get_bool(settings, "bg_accent2");
+	background.tone2 = (AccentTone)obs_data_get_int(settings, "bg_tone2");
 	background.blur = (float)obs_data_get_double(settings, "bg_blur");
 	background.darken = (float)obs_data_get_double(settings, "bg_darken");
 	background.desaturate = (float)obs_data_get_double(settings, "bg_desaturate");
@@ -217,6 +220,8 @@ void widget_update(void *data, obs_data_t *raw_settings)
 		element.idle_format = idle_format ? idle_format : "";
 		element.hide_empty = obs_data_get_bool(settings, key_for(prefix, "hide_empty").c_str());
 		element.follow_accent = obs_data_get_bool(settings, key_for(prefix, "accent").c_str());
+		element.tone = (AccentTone)obs_data_get_int(settings, key_for(prefix, "tone").c_str());
+		element.shadow_accent = obs_data_get_bool(settings, key_for(prefix, "shadow_accent").c_str());
 		element.rotation = (float)obs_data_get_double(settings, key_for(prefix, "rotation").c_str());
 
 		read_text_style(element.style, settings, prefix);
@@ -225,6 +230,10 @@ void widget_update(void *data, obs_data_t *raw_settings)
 	/* Progress bar. */
 	read_geometry(widget->bar_geometry, settings, "bar_", true);
 	widget->bar.update(widget->self, settings, "bar_");
+
+	read_extras(widget, settings);
+	read_visualizer(widget, settings);
+	read_motion(widget, settings);
 
 	/* The backdrop blur depends on the canvas size and on its own
 	 * settings, so any of them changing means asking for it again. */

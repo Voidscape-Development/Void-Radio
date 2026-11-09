@@ -28,7 +28,9 @@ add_library(
   "${VOID_RADIO_SRC}/music/album-art.cpp"
   "${VOID_RADIO_SRC}/music/gain-envelope.cpp"
   "${VOID_RADIO_SRC}/music/player.cpp"
+  "${VOID_RADIO_SRC}/sources/music-widget/spectrum.cpp"
   "${VOID_RADIO_SRC}/sources/music-widget/widget-layout.cpp"
+  "${VOID_RADIO_SRC}/sources/music-widget/widget-palette.cpp"
   "${VOID_RADIO_SRC}/ui/editor-snap.cpp"
   "${VOID_RADIO_SRC}/music/playlist.cpp"
   "${VOID_RADIO_SRC}/music/track-tags.cpp"
@@ -46,7 +48,7 @@ target_link_libraries(media-fixtures PUBLIC PkgConfig::FFMPEG)
 foreach(
   test_name
   IN
-  ITEMS tag playlist template player decoder widget-layout editor-snap
+  ITEMS tag playlist template player decoder widget-layout editor-snap spectrum palette
 )
   add_executable(${test_name}-tests "${test_name}-tests.cpp")
   target_link_libraries(${test_name}-tests PRIVATE void-radio-testable media-fixtures)
@@ -85,6 +87,7 @@ if(TARGET OBS::libobs)
     "${VOID_RADIO_SRC}/sources/music-widget/widget-design.cpp"
     "${VOID_RADIO_SRC}/sources/music-widget/widget-draw.cpp"
     "${VOID_RADIO_SRC}/sources/music-widget/widget-layout.cpp"
+    "${VOID_RADIO_SRC}/sources/music-widget/widget-palette.cpp"
   )
   target_include_directories(
     widget-design-tests

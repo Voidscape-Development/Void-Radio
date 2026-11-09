@@ -48,6 +48,7 @@ int main()
 	check("state", run("{state}"), "Playing");
 	check("escaped brackets", run("\\[{state}\\]"), "[Playing]");
 	check("escaped brace", run("\\{title\\}"), "{title}");
+
 	check("case insensitive", run("{TITLE}"), "Neon Drift");
 	check("unknown field kept", run("{bogus}"), "{bogus}");
 	check("optional group kept", run("{title}[ - {artist}]"), "Neon Drift - Voidscape");
@@ -67,6 +68,43 @@ int main()
 	snapshot.progress = 0.0f;
 	check("stream duration empty", run("{elapsed}[ / {duration}]"), "1:05");
 	check("stream percent empty", run("[{percent}]"), "");
+
+	/* The fields added for the widget's extra details. */
+	{
+		vr::Snapshot extra;
+		extra.valid = true;
+		extra.title = "Neon Drift";
+		extra.index = 2;
+		extra.count = 12;
+		extra.codec = "FLAC";
+		extra.bitrate = "1024 kbps";
+		extra.samplerate = "44.1 kHz";
+		extra.bpm = "120";
+		extra.next_album = "Night Moves";
+
+		vr::TemplateContext extra_ctx;
+		extra_ctx.snapshot = &extra;
+		extra_ctx.have_snapshot = true;
+		const auto expand = [&](const std::string &format) {
+			return vr::expand_template(format, extra_ctx);
+		};
+
+		check("technical fields", expand("{codec} · {bitrate} · {samplerate}"), "FLAC · 1024 kbps · 44.1 kHz");
+		check("position field", expand("{position}"), "3 / 12");
+		check("bpm", expand("[{bpm} BPM]"), "120 BPM");
+		check("missing composer drops group", expand("{title}[ by {composer}]"), "Neon Drift");
+		check("next album", expand("{next_album}"), "Night Moves");
+
+		/* Every field a picker offers is one the expander knows: none
+		 * comes back as its own placeholder. */
+		for (const char *const *field = vr::template_fields(); *field; field++) {
+			const std::string placeholder = std::string("{") + *field + "}";
+			if (expand(placeholder) == placeholder) {
+				printf("FAIL field unknown: %s\n", *field);
+				failures++;
+			}
+		}
+	}
 
 	/* Nothing playing at all. */
 	vr::Snapshot idle;

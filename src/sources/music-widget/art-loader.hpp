@@ -38,6 +38,7 @@ public:
 	struct Request {
 		std::string path;
 		std::string placeholder;
+		int sample = 0; /* non zero: a made-up cover for the editor's sample track */
 		bool want_blur = false;
 		uint32_t blur_width = 0;
 		uint32_t blur_height = 0;
