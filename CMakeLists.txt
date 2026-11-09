@@ -69,6 +69,8 @@ target_sources(
     src/audio/stream-deck.hpp
     src/filters/music-info-filter.cpp
     src/filters/music-info-filter.hpp
+    src/integrations/websocket.cpp
+    src/integrations/websocket.hpp
     src/music/album-art.cpp
     src/music/album-art.hpp
     src/music/command-queue.hpp

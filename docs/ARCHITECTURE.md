@@ -38,6 +38,36 @@ Everything that shows music - the Music Widget, the progress bar, the info filte
 reads the published `Snapshot` through `src/music/music-api.hpp`. None of them know how playback
 works, which is what made it possible to replace the engine without touching them.
 
+## Volume, ducking and silence
+
+Three things change the music's level on its way out, each where it can be tested on its own:
+
+- **Volume levelling** lives in `Player`. Each `Voice` carries a level and a target; `level_for()`
+  works the target out from the entry's loudness (ReplayGain or R128 tags, read in
+  `track-tags.cpp`, or measured) and `apply_level()` settles towards it smoothly, so loudness
+  that arrives mid-track is a ramp, not a jump. Measuring is `LoudnessMeter`
+  (`src/audio/loudness.cpp`, BS.1770 K-weighting and gating, pure) driven over a whole file by
+  `measure_loudness()` on the library worker, with results kept in a small tab-separated cache in
+  the plugin's config folder, keyed by path, size and modification time. The worker hands a
+  file's tags over before measuring it (marked `measuring`) and again afterwards, so names show
+  at once; `next_untagged()` asks for each file to be measured once.
+- **Silence skipping** also lives in `Player`, in `mix_voice()`: `trim_lead()` reads on through
+  the deck's buffer until sound starts, so seconds of silence are skipped within a block or two,
+  and `watch_tail()` ends a voice early once the last stretch of a track has stayed quiet. Seeks
+  turn both off for that voice.
+- **Ducking** is applied by `MusicSource` to the whole output block, after the player, because it
+  depends on another OBS source. The trigger is bound by name with an audio capture callback that
+  keeps only the block's peak in an atomic; the engine takes it once per block and `Ducker`
+  (`src/music/ducker.cpp`, pure) turns it into a gain moving at a steady rate in decibels.
+
+## Remote control
+
+`src/integrations/websocket.cpp` registers vendor requests with obs-websocket through libobs's
+proc handlers, the same calls obs-websocket's own API header makes, so the plugin needs nothing
+from obs-websocket to build and skips this when it is not installed. Requests use the public
+`music-api.hpp` functions. Events are sent from each music source's `publish()` on its engine
+thread, only when the track, its title or artist, or the play state actually changed.
+
 ## The Music Widget
 
 The widget's settings come in two layers. What the user mostly touches is the design: a layout,
@@ -110,6 +140,8 @@ Other threads hand it work or read a published copy; they never reach in.
 | Library worker | folder walking, tag reading | posting `set_entries` / `set_tags` commands |
 | Art loader (widget) | cover decoding and blurring | a single request/result slot the widget polls |
 | OBS audio thread (widget visualiser) | nothing of ours | appending to the widget's audio ring under its mutex |
+| OBS audio thread (duck trigger) | nothing of ours | raising an atomic peak the engine takes each block |
+| obs-websocket's threads | nothing of ours | the same posting and snapshot reads as the dock |
 | Layout editor preview (OBS graphics thread) | its render target and staging surface | a mutex-guarded copy of the last frame the editor's timer picks up |
 | OBS UI / graphics / hotkey threads | nothing of ours | posting commands, reading snapshots |
 
@@ -130,7 +162,10 @@ So when you add a transport feature, it goes in `Player` and is reached by posti
 | `src/music/source-hotkeys.*` | Per-source hotkeys. |
 | `src/music/library-worker.*` | Folder scanning and tag reading off the engine thread. |
 | `src/music/music-api.*`, `music-link.cpp` | The public face other sources use: snapshot, entries, transport calls, and `MusicLink` for binding to a music source by name and UUID. |
-| `src/music/track-tags.*`, `album-art.*` | Tags and embedded/sidecar cover art via FFmpeg. |
+| `src/music/track-tags.*`, `album-art.*` | Tags (ReplayGain and R128 included) and embedded/sidecar cover art via FFmpeg. |
+| `src/audio/loudness.*`, `src/music/loudness-scan.*` | The loudness meter, measuring whole files, and the measurement cache. |
+| `src/music/ducker.*`, `music-source-duck.cpp` | Ducking: the gain computer, and binding to the trigger source. |
+| `src/integrations/websocket.*` | obs-websocket vendor requests and events. |
 | `src/sources/music-widget-source.cpp`, `src/sources/music-widget/` | The Music Widget. `widget.hpp` lists its element types and the few functions its files share; `widget-layout` and `widget-design` are the layouts, styles and designs described above; `widget-visualizer` and `spectrum` the visualiser; `widget-extras` the image, icon and glow; `widget-motion` the pop-in and entrances; `widget-palette` the album colour tones. |
 | `src/ui/widget-editor.*`, `editor-canvas.*`, `editor-snap.*` | The layout editor: canvas, layers, inspector, designs. |
 | `src/sources/progress-bar-source.cpp`, `src/render/bar-renderer.*` | The progress bar, also drawn inside the widget. |
@@ -194,10 +229,12 @@ So when you add a transport feature, it goes in `Player` and is reached by posti
 
 | Test | Covers | Needs |
 |---|---|---|
-| `player` | transport behaviour end to end, with fake decks | nothing |
+| `player` | transport behaviour end to end, with fake decks, including volume levelling and skipping silence | nothing |
 | `decoder` | decoding, sample-exact seeks, the cover-art seek case, bad files | FFmpeg dev packages |
-| `tag` | tags in every container, cover art choice, sidecar art | FFmpeg dev packages |
+| `tag` | tags in every container, ReplayGain, the technical details, measuring a file and the cache, cover art choice, sidecar art | FFmpeg dev packages |
 | `playlist`, `template` | play order; the now-playing template language | nothing |
+| `loudness` | the meter against EBU Tech 3341's reference points, gating, and weighting | nothing |
+| `ducker` | ducking depth, attack, hold and release | nothing |
 | `widget-layout` | every widget layout, and a sweep of sizes that checks nothing overlaps or spills | nothing |
 | `editor-snap` | the layout editor's snapping, grid, aligning and distributing | nothing |
 | `editor-canvas` | the editor's canvas driven by simulated mouse and keyboard input: selecting, group moves, the selection band, locking, zoom and the grid | Qt 6 |

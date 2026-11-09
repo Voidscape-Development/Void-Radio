@@ -26,6 +26,19 @@ built around music playback.
   the program output.
 * Global hotkeys for play/pause, stop, next, previous and restart.
 * Appears in OBS's own media controls, so the built-in transport buttons work too.
+* **Even out the volume** so one track is not much louder than the next. Each track is turned up
+  or down towards a target loudness (in LUFS) taken from its ReplayGain or R128 tags, or, for
+  files without them, measured once in the background and remembered. Album mode keeps a tagged
+  album's quiet and loud tracks as they were mastered, and a guard stops a quiet track with loud
+  peaks from being boosted into clipping.
+* **Turn the music down while someone talks.** Pick a source to listen to, usually your
+  microphone; while it is louder than the threshold the music goes down by as much as you ask,
+  stays down through short pauses, and comes back up afterwards. Attack, hold and release times
+  are all adjustable.
+* **Skip silence** at the start and end of tracks, so there is no dead air between songs. Quiet
+  audio before a track starts is skipped at once, and a track whose last half minute has gone
+  quiet for a second and a half ends there. A quiet passage in the middle of a track is never cut,
+  and seeking always lands where it was asked to.
 
 Audio is decoded with FFmpeg (the copy OBS already ships) and mixed inside the Music Source,
 so the music arrives in the audio mixer as a single channel with working volume, filters,
@@ -202,6 +215,37 @@ Under **View → Docks → Now Playing**: pick a Music Source, see the current t
 scrub with the seek bar, and use the transport, shuffle and repeat controls. The playlist below
 can be reordered by dragging, played by double-clicking, and each track has a context menu for
 editing its title and artist or removing it from the list.
+
+### Remote control (obs-websocket)
+
+When obs-websocket is installed (it ships with OBS 28 and later), Void Radio registers vendor
+requests under the vendor name `void-radio`, so Stream Deck, Streamer.bot, Touch Portal, chat bots
+and anything else that speaks obs-websocket can drive the music. Send them with
+`CallVendorRequest`:
+
+| Request | Request data | Does |
+|---|---|---|
+| `GetMusicSources` | | Lists every music source with what it is playing |
+| `GetNowPlaying` | | State, title, artist, album, position, length, playlist position, next track |
+| `GetPlaylist` | | Every entry, the current index, shuffle and repeat |
+| `Play`, `Pause`, `TogglePause`, `Stop`, `Next`, `Previous`, `Restart` | | Transport |
+| `Seek` | `positionMs` | Moves within the track |
+| `PlayIndex` | `index` | Plays an entry, counting from 0 |
+| `SetShuffle` | `shuffle` (true/false) | |
+| `SetRepeat` | `mode` (`off`, `all`, `one`) | |
+
+Every request also takes an optional `sourceName` or `sourceUuid`; without one it goes to the
+first music source. Every response has `ok`, and `error` when it is false. For example, with
+obs-websocket's own request format:
+
+```json
+{"requestType": "CallVendorRequest", "requestData": {
+  "vendorName": "void-radio", "requestType": "Next", "requestData": {"sourceName": "Music"}}}
+```
+
+Two vendor events go out to subscribers of `VendorEvent`: `NowPlayingChanged`, when a track
+starts or its details arrive, and `PlaybackStateChanged`, on play, pause and stop. Both carry the
+same fields as `GetNowPlaying`.
 
 ## Installing
 

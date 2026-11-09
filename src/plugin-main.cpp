@@ -21,6 +21,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include <util/platform.h>
 
 #include "filters/music-info-filter.hpp"
+#include "integrations/websocket.hpp"
 #include "music/loudness-scan.hpp"
 #include "music/music-source.hpp"
 #include "sources/progress-bar-source.hpp"
@@ -80,6 +81,9 @@ bool obs_module_load(void)
  * the dock is registered here rather than in obs_module_load. */
 void obs_module_post_load(void)
 {
+	/* obs-websocket asks for vendors to register here, once it is up. */
+	vr::register_websocket_vendor();
+
 #ifdef VOID_RADIO_ENABLE_DOCK
 	vr::register_now_playing_dock();
 #endif

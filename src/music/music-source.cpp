@@ -18,6 +18,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 
 #include "music/music-source.hpp"
 #include "audio/stream-deck.hpp"
+#include "integrations/websocket.hpp"
 
 #include <plugin-support.h>
 #include <media-io/audio-io.h>
@@ -154,6 +155,8 @@ MusicSource::~MusicSource()
 	if (thread_.joinable())
 		thread_.join();
 
+	websocket_forget(self_);
+
 	player_.reset();
 	library_.reset();
 }
@@ -245,6 +248,8 @@ void MusicSource::publish()
 {
 	Snapshot snapshot;
 	player_->fill_snapshot(snapshot);
+
+	websocket_publish(self_, snapshot);
 
 	{
 		std::lock_guard<std::mutex> lock(snapshot_mutex_);
