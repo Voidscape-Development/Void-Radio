@@ -17,11 +17,15 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 */
 
 #include "music/library-worker.hpp"
+#include "music/loudness-scan.hpp"
 #include "music/track-tags.hpp"
 #include "util/vr-util.hpp"
 
+#include <util/base.h>
 #include <util/platform.h>
 #include <util/threading.h>
+
+#include <cmath>
 
 namespace vr {
 
@@ -44,6 +48,14 @@ namespace {
 
 std::vector<PlaylistEntry> build_entries(const PlaylistConfig &config)
 {
+	/* Internet streams are no longer played; say so for any an older
+	 * scene collection still lists, rather than dropping them silently. */
+	for (const std::string &path : config.paths) {
+		if (is_url(path))
+			blog(LOG_WARNING, "[void-radio] internet streams are no longer supported, skipping %s",
+			     path.c_str());
+	}
+
 	const std::vector<std::string> expanded = expand_paths(config.paths, config.recurse);
 
 	std::vector<PlaylistEntry> entries;
@@ -52,8 +64,7 @@ std::vector<PlaylistEntry> build_entries(const PlaylistConfig &config)
 	for (const std::string &path : expanded) {
 		PlaylistEntry entry;
 		entry.path = path;
-		entry.url = is_url(path);
-		entry.missing = !entry.url && !os_file_exists(path.c_str());
+		entry.missing = !os_file_exists(path.c_str());
 
 		for (const PlaylistEntry &override_entry : config.overrides) {
 			if (override_entry.path == path) {
@@ -85,6 +96,7 @@ LibraryWorker::~LibraryWorker()
 
 void LibraryWorker::shutdown()
 {
+	abort_.store(true);
 	{
 		std::lock_guard<std::mutex> lock(mutex_);
 		stopping_ = true;
@@ -105,11 +117,12 @@ void LibraryWorker::rebuild(PlaylistConfig config)
 	cv_.notify_all();
 }
 
-void LibraryWorker::read_tags_for(const std::string &path)
+void LibraryWorker::read_tags_for(const std::string &path, bool measure)
 {
 	{
 		std::lock_guard<std::mutex> lock(mutex_);
 		tags_path_ = path;
+		tags_measure_ = measure;
 	}
 	cv_.notify_all();
 }
@@ -122,6 +135,7 @@ void LibraryWorker::run()
 		bool rebuild = false;
 		PlaylistConfig config;
 		std::string tags_path;
+		bool measure = false;
 
 		{
 			std::unique_lock<std::mutex> lock(mutex_);
@@ -138,6 +152,7 @@ void LibraryWorker::run()
 				config = config_;
 			} else {
 				tags_path.swap(tags_path_);
+				measure = tags_measure_;
 			}
 		}
 
@@ -148,6 +163,43 @@ void LibraryWorker::run()
 
 		Tags tags;
 		read_tags(tags_path, tags);
+
+		if (!measure || !std::isnan(tags.track_loudness)) {
+			tags.loudness_checked = measure;
+			on_tags_(tags_path, tags);
+			continue;
+		}
+
+		float loudness = 0.0f;
+		float peak = 0.0f;
+
+		if (cached_loudness(tags_path, loudness, peak)) {
+			tags.track_loudness = loudness;
+			tags.track_peak = peak;
+			tags.loudness_checked = true;
+			on_tags_(tags_path, tags);
+			continue;
+		}
+
+		/* The names go up straight away; measuring takes a moment. */
+		Tags early = tags;
+		early.measuring = true;
+		on_tags_(tags_path, early);
+
+		const InterruptFn interrupt = [this]() {
+			return abort_.load();
+		};
+
+		if (measure_loudness(tags_path, loudness, peak, &interrupt)) {
+			store_loudness(tags_path, loudness, peak);
+			tags.track_loudness = loudness;
+			tags.track_peak = peak;
+		}
+
+		if (abort_.load())
+			return;
+
+		tags.loudness_checked = true;
 		on_tags_(tags_path, tags);
 	}
 }

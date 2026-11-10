@@ -58,13 +58,13 @@ using SwrPtr = std::unique_ptr<SwrContext, SwrFreer>;
 using InterruptFn = std::function<bool()>;
 
 /*
- * Opens a file or URL for reading. Only the container header is read, which is
+ * Opens a file for reading. Only the container header is read, which is
  * enough for metadata and attached pictures; decoding also needs
- * avformat_find_stream_info. Network inputs get timeouts and reconnects, and
- * `interrupt` (which must outlive the context) lets another thread abandon a
- * stalled read. Returns null on failure, with the reason in `error`.
+ * avformat_find_stream_info. `interrupt` (which must outlive the context)
+ * lets another thread abandon a slow read. Returns null on failure, with the
+ * reason in `error`.
  */
-FormatPtr open_input(const std::string &path, bool is_url, const InterruptFn *interrupt, std::string *error);
+FormatPtr open_input(const std::string &path, const InterruptFn *interrupt, std::string *error);
 
 std::string av_error_string(int code);
 

@@ -54,8 +54,8 @@ static void draw_background(MusicWidget *widget)
 	params.border_width = background.border_width;
 	params.border_color = resolve_color(widget, background.border_color, background.border_accent);
 	params.opacity = background.opacity;
-	params.color = resolve_color(widget, background.color, background.follow_accent);
-	params.color2 = background.color2;
+	params.color = resolve_color(widget, background.color, background.follow_accent, background.tone);
+	params.color2 = resolve_color(widget, background.color2, background.follow_accent2, background.tone2);
 	params.gradient_angle = background.gradient_angle;
 
 	switch (background.type) {
@@ -106,7 +106,7 @@ static void draw_art(MusicWidget *widget)
 	params.corner_radius = art.corner_radius;
 	params.border_width = art.border_width;
 	params.border_color = resolve_color(widget, art.border_color, art.border_accent);
-	params.opacity = art.geometry.opacity;
+	params.opacity = art.geometry.opacity * widget->draw_opacity;
 	params.color = 0xFFFFFFFF;
 
 	const float texture_width = (float)gs_texture_get_width(widget->art_texture);
@@ -164,7 +164,7 @@ static void draw_art(MusicWidget *widget)
 		shadow.corner_radius = art.corner_radius;
 		shadow.softness = art.shadow_blur;
 		shadow.color = art.shadow_color;
-		shadow.opacity = art.geometry.opacity;
+		shadow.opacity = params.opacity;
 		shadow.rotation = params.rotation;
 		shadow.scale = params.scale;
 
@@ -194,7 +194,7 @@ static void draw_text(MusicWidget *widget, TextElement &element)
 	DrawParams params;
 	params.fill_mode = 2;
 	params.texture = element.texture;
-	params.opacity = element.geometry.opacity;
+	params.opacity = element.geometry.opacity * widget->draw_opacity;
 	params.rotation = element.rotation;
 	params.color = 0xFFFFFFFF;
 
@@ -233,10 +233,24 @@ static void draw_bar(MusicWidget *widget)
 	gs_matrix_push();
 	gs_matrix_translate3f(x, y, 0.0f);
 
+	widget->bar.set_opacity(widget->draw_opacity);
 	widget->bar.render(width, height);
+	widget->bar.set_opacity(1.0f);
 
 	gs_matrix_pop();
 }
+
+/* What each drawable is, for sorting and for the entrance animation. */
+enum class Kind {
+	Background,
+	Glow,
+	Art,
+	Image,
+	Icon,
+	Text,
+	Bar,
+	Visualizer,
+};
 
 /* Everything the widget draws, in the order the z values ask for. */
 static void draw_elements(MusicWidget *widget)
@@ -244,27 +258,33 @@ static void draw_elements(MusicWidget *widget)
 	struct Item {
 		int z;
 		int order;
-		int kind; /* 0 background, 1 art, 2 bar, 3..8 text slots */
+		Kind kind;
+		int slot;
+		const Geometry *geometry;
 	};
 
 	std::vector<Item> items;
-	items.reserve(TEXT_SLOTS + 3);
+	items.reserve(TEXT_SLOTS + 8);
 
 	int order = 0;
+	const auto add = [&](bool enabled, int z, Kind kind, int slot, const Geometry *geometry) {
+		if (enabled)
+			items.push_back({z, order, kind, slot, geometry});
+		order++;
+	};
 
-	if (widget->background.enabled)
-		items.push_back({widget->background.z, order++, 0});
+	add(widget->background.enabled, widget->background.z, Kind::Background, 0, nullptr);
+	add(widget->glow.geometry.enabled, widget->glow.geometry.z, Kind::Glow, 0, &widget->glow.geometry);
+	add(widget->art.geometry.enabled, widget->art.geometry.z, Kind::Art, 0, &widget->art.geometry);
+	add(widget->image.geometry.enabled, widget->image.geometry.z, Kind::Image, 0, &widget->image.geometry);
+	add(widget->bar_geometry.enabled, widget->bar_geometry.z, Kind::Bar, 0, &widget->bar_geometry);
+	add(widget->viz.geometry.enabled, widget->viz.geometry.z, Kind::Visualizer, 0, &widget->viz.geometry);
 
-	if (widget->art.geometry.enabled)
-		items.push_back({widget->art.geometry.z, order++, 1});
+	for (int slot = 0; slot < TEXT_SLOTS; slot++)
+		add(widget->text[slot].geometry.enabled, widget->text[slot].geometry.z, Kind::Text, slot,
+		    &widget->text[slot].geometry);
 
-	if (widget->bar_geometry.enabled)
-		items.push_back({widget->bar_geometry.z, order++, 2});
-
-	for (int slot = 0; slot < TEXT_SLOTS; slot++) {
-		if (widget->text[slot].geometry.enabled)
-			items.push_back({widget->text[slot].geometry.z, order++, 3 + slot});
-	}
+	add(widget->icon.geometry.enabled, widget->icon.geometry.z, Kind::Icon, 0, &widget->icon.geometry);
 
 	/* Equal z values keep their declaration order, so the panel is behind
 	 * the art is behind the text unless told otherwise. */
@@ -274,22 +294,82 @@ static void draw_elements(MusicWidget *widget)
 		return a.order < b.order;
 	});
 
+	/* Entrances run top to bottom, left to right, which is the order people
+	 * read the card in, rather than the order it is stacked in. */
+	std::vector<const Item *> reading;
+	for (const Item &item : items)
+		if (item.geometry)
+			reading.push_back(&item);
+
+	const auto top_left = [widget](const Item *item, float &x, float &y) {
+		resolve_position(*item->geometry, widget->width, widget->height, x, y);
+	};
+	std::stable_sort(reading.begin(), reading.end(), [&](const Item *a, const Item *b) {
+		float ax, ay, bx, by;
+		top_left(a, ax, ay);
+		top_left(b, bx, by);
+		if (std::fabs(ay - by) > 4.0f)
+			return ay < by;
+		return ax < bx;
+	});
+
+	const PlayState state = widget->have_snapshot ? widget->snapshot.state : PlayState::Stopped;
+
 	for (const Item &item : items) {
+		int place = -1;
+		for (size_t i = 0; i < reading.size(); i++)
+			if (reading[i] == &item)
+				place = (int)i;
+
+		const Reveal reveal = element_reveal(widget, place);
+		const bool moved = reveal.dx != 0.0f || reveal.dy != 0.0f || reveal.scale != 1.0f;
+
+		widget->draw_opacity = reveal.opacity;
+
+		if (moved) {
+			float x = 0.0f, y = 0.0f;
+			resolve_position(*item.geometry, widget->width, widget->height, x, y);
+			const float cx = x + item.geometry->width * 0.5f;
+			const float cy = y + item.geometry->height * 0.5f;
+
+			gs_matrix_push();
+			gs_matrix_translate3f(cx + reveal.dx, cy + reveal.dy, 0.0f);
+			gs_matrix_scale3f(reveal.scale, reveal.scale, 1.0f);
+			gs_matrix_translate3f(-cx, -cy, 0.0f);
+		}
+
 		switch (item.kind) {
-		case 0:
+		case Kind::Background:
 			draw_background(widget);
 			break;
-		case 1:
+		case Kind::Glow:
+			draw_glow(widget);
+			break;
+		case Kind::Art:
 			draw_art(widget);
 			break;
-		case 2:
+		case Kind::Image:
+			draw_image(widget);
+			break;
+		case Kind::Icon:
+			draw_icon(widget, state);
+			break;
+		case Kind::Bar:
 			draw_bar(widget);
 			break;
-		default:
-			draw_text(widget, widget->text[item.kind - 3]);
+		case Kind::Visualizer:
+			draw_visualizer(widget);
+			break;
+		case Kind::Text:
+			draw_text(widget, widget->text[item.slot]);
 			break;
 		}
+
+		if (moved)
+			gs_matrix_pop();
 	}
+
+	widget->draw_opacity = 1.0f;
 }
 
 static void ensure_previous_texture(MusicWidget *widget)
@@ -318,6 +398,10 @@ void widget_render(void *data, gs_effect_t *unused)
 		return;
 
 	if (widget->idle && widget->idle_mode == WidgetIdle::Hide)
+		return;
+
+	const Reveal shown = popup_reveal(widget);
+	if (shown.opacity <= 0.0f)
 		return;
 
 	/* Source backed bar layers render into targets of their own, which has
@@ -387,11 +471,12 @@ void widget_render(void *data, gs_effect_t *unused)
 		DrawParams params;
 		params.fill_mode = 2;
 		params.texture = texture;
-		params.x = offset_x;
-		params.y = 0.0f;
+		params.x = offset_x + shown.dx;
+		params.y = shown.dy;
 		params.width = (float)widget->width;
 		params.height = (float)widget->height;
-		params.opacity = opacity;
+		params.opacity = opacity * shown.opacity;
+		params.scale = shown.scale;
 		params.color = 0xFFFFFFFF;
 
 		draw_quad(widget->effect, params, true);

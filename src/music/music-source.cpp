@@ -18,6 +18,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 
 #include "music/music-source.hpp"
 #include "audio/stream-deck.hpp"
+#include "integrations/websocket.hpp"
 
 #include <plugin-support.h>
 #include <media-io/audio-io.h>
@@ -103,7 +104,7 @@ MusicSource::MusicSource(obs_data_t *settings, obs_source_t *source) : self_(sou
 	player_ = std::make_unique<Player>(
 		format,
 		[format](const PlaylistEntry &entry) -> std::unique_ptr<Deck> {
-			return std::make_unique<StreamDeck>(entry.path, entry.url, format, log_warning);
+			return std::make_unique<StreamDeck>(entry.path, format, log_warning);
 		},
 		log_warning);
 
@@ -122,7 +123,9 @@ MusicSource::MusicSource(obs_data_t *settings, obs_source_t *source) : self_(sou
 		[this](const std::string &path, const Tags &tags) {
 			post([this, path, tags]() {
 				player_->set_tags(path, tags);
-				if (tags_in_flight_ == path)
+				/* Tags handed over before measuring are followed by
+				 * the measured ones; the read is not done yet. */
+				if (tags_in_flight_ == path && !tags.measuring)
 					tags_in_flight_.clear();
 			});
 		});
@@ -141,6 +144,9 @@ MusicSource::~MusicSource()
 {
 	hotkeys_.reset();
 
+	/* Before anything else goes, so OBS's audio thread cannot call in. */
+	unbind_duck_trigger();
+
 	/* The library goes first so that it cannot post into a queue nobody
 	 * will run; then the engine, which takes every deck with it. */
 	library_->shutdown();
@@ -148,6 +154,8 @@ MusicSource::~MusicSource()
 	running_.store(false);
 	if (thread_.joinable())
 		thread_.join();
+
+	websocket_forget(self_);
 
 	player_.reset();
 	library_.reset();
@@ -198,9 +206,12 @@ void MusicSource::output_block(size_t frames)
 		planes[ch] = block_[ch].data();
 
 	if (!player_->render(planes, frames)) {
+		apply_duck(nullptr, frames);
 		timeline_running_ = false;
 		return;
 	}
+
+	apply_duck(planes, frames);
 
 	const uint64_t now = os_gettime_ns();
 
@@ -238,6 +249,8 @@ void MusicSource::publish()
 	Snapshot snapshot;
 	player_->fill_snapshot(snapshot);
 
+	websocket_publish(self_, snapshot);
+
 	{
 		std::lock_guard<std::mutex> lock(snapshot_mutex_);
 		snapshot_ = std::move(snapshot);
@@ -257,14 +270,54 @@ void MusicSource::publish()
 		info.path = entry.path;
 		info.title = entry.display_title();
 		info.artist = entry.display_artist();
-		info.url = entry.url;
 		info.missing = entry.missing;
 		entries.push_back(std::move(info));
+	}
+
+	std::vector<int> queued;
+	for (const std::string &path : player_->queue()) {
+		const int index = player_->playlist().index_of(path);
+		if (index >= 0)
+			queued.push_back(index);
 	}
 
 	std::lock_guard<std::mutex> lock(entries_mutex_);
 	entries_ = std::move(entries);
 	current_index_ = player_->playlist().current();
+	queue_ = std::move(queued);
+}
+
+void MusicSource::queue(std::vector<int> &out) const
+{
+	std::lock_guard<std::mutex> lock(entries_mutex_);
+	out = queue_;
+}
+
+/* The queue is addressed by playlist index from outside, and turned into a
+ * path on the engine thread, where the list it indexes is. */
+void MusicSource::queue_index(int index, bool next)
+{
+	post([this, index, next]() {
+		if (const PlaylistEntry *entry = player_->playlist().at(index))
+			player_->queue_track(entry->path, next);
+	});
+}
+
+void MusicSource::unqueue(int position)
+{
+	if (position >= 0)
+		post([this, position]() { player_->unqueue((size_t)position); });
+}
+
+void MusicSource::move_queued(int from, int to)
+{
+	if (from >= 0 && to >= 0)
+		post([this, from, to]() { player_->move_queued((size_t)from, (size_t)to); });
+}
+
+void MusicSource::clear_queue()
+{
+	post([this]() { player_->clear_queue(); });
 }
 
 void MusicSource::request_tags()
@@ -274,7 +327,7 @@ void MusicSource::request_tags()
 
 	tags_in_flight_ = player_->next_untagged();
 	if (!tags_in_flight_.empty())
-		library_->read_tags_for(tags_in_flight_);
+		library_->read_tags_for(tags_in_flight_, player_->wants_measure());
 }
 
 /* -------------------------------------------------------------------------- */

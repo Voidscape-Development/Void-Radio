@@ -50,6 +50,28 @@ bool lookup_field(const TemplateContext &context, const std::string &name, std::
 		out = snap.next_title;
 	else if (name == "next_artist")
 		out = snap.next_artist;
+	else if (name == "next_album")
+		out = snap.next_album;
+	else if (name == "album_artist")
+		out = snap.album_artist;
+	else if (name == "composer")
+		out = snap.composer;
+	else if (name == "comment")
+		out = snap.comment;
+	else if (name == "bpm")
+		out = snap.bpm;
+	else if (name == "disc")
+		out = snap.disc;
+	else if (name == "codec")
+		out = snap.codec;
+	else if (name == "bitrate")
+		out = snap.bitrate;
+	else if (name == "samplerate")
+		out = snap.samplerate;
+	else if (name == "position")
+		out = snap.index >= 0 && snap.count > 0
+			      ? std::to_string(snap.index + 1) + " / " + std::to_string(snap.count)
+			      : std::string();
 	else if (name == "elapsed")
 		out = format_time(snap.elapsed_ms, context.time_format);
 	else if (name == "duration")
@@ -174,6 +196,17 @@ std::string expand_template(const std::string &format, const TemplateContext &co
 		resolved.snapshot = &empty;
 
 	return expand_impl(format, resolved);
+}
+
+const char *const *template_fields()
+{
+	static const char *const FIELDS[] = {
+		"title",      "artist",   "album",   "album_artist", "year",     "genre",      "track",
+		"disc",       "composer", "comment", "bpm",          "elapsed",  "duration",   "remaining",
+		"percent",    "state",    "index",   "count",        "position", "next_title", "next_artist",
+		"next_album", "codec",    "bitrate", "samplerate",   "filename", "path",       nullptr,
+	};
+	return FIELDS;
 }
 
 } // namespace vr

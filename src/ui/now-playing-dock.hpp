@@ -18,6 +18,8 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 
 #pragma once
 
+#include "music/music-api.hpp"
+
 #include <obs.h>
 
 #include <QComboBox>
@@ -65,6 +67,9 @@ private slots:
 	void onEntryActivated(QListWidgetItem *item);
 	void onEntryMenu(const QPoint &position);
 	void onPlaylistReordered();
+	void onQueueMenu(const QPoint &position);
+	void onQueueReordered(const QModelIndex &parent, int start, int end, const QModelIndex &destination, int row);
+	void onClearQueue();
 
 private:
 	obs_source_t *acquireSource() const;
@@ -72,6 +77,7 @@ private:
 	void updateTransport();
 	void updatePlaylist();
 	void editEntry(int row);
+	void updateQueue(const std::vector<EntryInfo> &entries, const std::vector<int> &queue);
 
 	QComboBox *sourceCombo_ = nullptr;
 	QLabel *titleLabel_ = nullptr;
@@ -86,6 +92,11 @@ private:
 	QToolButton *shuffleButton_ = nullptr;
 	QComboBox *repeatCombo_ = nullptr;
 	QListWidget *playlistWidget_ = nullptr;
+	QWidget *queueBox_ = nullptr;
+	QLabel *queueLabel_ = nullptr;
+	QToolButton *clearQueueButton_ = nullptr;
+	QListWidget *queueWidget_ = nullptr;
+	std::vector<int> shownQueue_;
 	QTimer *timer_ = nullptr;
 
 	obs_weak_source_t *selected_ = nullptr;

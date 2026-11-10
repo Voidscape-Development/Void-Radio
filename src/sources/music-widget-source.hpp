@@ -18,8 +18,32 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 
 #pragma once
 
+#include "music/snapshot.hpp"
+
+#include <obs.h>
+
 namespace vr {
 
 void register_music_widget_source();
+
+/*
+ * For the layout editor. Both are safe to call from the UI thread and ignore
+ * anything that is not a Music Widget.
+ *
+ * The sample track stands in for the linked music source while the editor is
+ * designing, so there is something to lay out with nothing playing. It is what
+ * the widget draws everywhere, OBS's own preview and output included, until it
+ * is switched off again.
+ */
+void set_widget_sample_track(obs_source_t *widget, bool active, bool long_text);
+
+/* Plays the track change again: with the sample track on, moves to the other
+ * sample track; otherwise runs the pop-in, entrances and transition as if a
+ * track had just started. */
+void replay_widget_track_change(obs_source_t *widget);
+
+/* The track the widget is showing, sample track included, for previewing a
+ * template. False when it is showing nothing. */
+bool get_widget_snapshot(obs_source_t *widget, Snapshot &out);
 
 } // namespace vr

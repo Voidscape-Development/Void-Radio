@@ -75,5 +75,58 @@ int main()
 		check_true("min size: kept", r.rect.width >= 3);
 	}
 
+	/* The grid: a move lands the corner on it, a resize the dragged edge. */
+	{
+		const Rect moved = snap_to_grid({13, 27, 50, 33}, EdgeAll, 10);
+		check_near("grid move: x", moved.x, 10, 0.001);
+		check_near("grid move: y", moved.y, 30, 0.001);
+		check_near("grid move: size kept", moved.width, 50, 0.001);
+
+		const Rect sized = snap_to_grid({10, 10, 47, 33}, EdgeRight | EdgeBottom, 10);
+		check_near("grid resize: right edge", sized.x + sized.width, 60, 0.001);
+		check_near("grid resize: bottom edge", sized.y + sized.height, 40, 0.001);
+		check_near("grid resize: left fixed", sized.x, 10, 0.001);
+	}
+
+	/* Aligning a selection to its own bounds. */
+	{
+		const std::vector<Rect> rects = {{10, 10, 50, 20}, {100, 40, 30, 30}, {40, 90, 80, 10}};
+		const Rect bounds = bounds_of(rects);
+		check_near("bounds: left", bounds.x, 10, 0.001);
+		check_near("bounds: right", bounds.x + bounds.width, 130, 0.001);
+		check_near("bounds: bottom", bounds.y + bounds.height, 100, 0.001);
+
+		const std::vector<Rect> left = align_rects(rects, Align::Left, bounds);
+		check_true("align left: all at 10", left[0].x == 10 && left[1].x == 10 && left[2].x == 10);
+		check_near("align left: y kept", left[1].y, 40, 0.001);
+
+		const std::vector<Rect> right = align_rects(rects, Align::Right, bounds);
+		check_near("align right: right edges meet", right[1].x + right[1].width, 130, 0.001);
+		check_near("align right: wide one too", right[2].x + right[2].width, 130, 0.001);
+
+		const std::vector<Rect> middle = align_rects(rects, Align::VerticalCenter, bounds);
+		check_near("align middle: centres meet", middle[0].y + middle[0].height / 2, 55, 0.5);
+		check_near("align middle: tall one", middle[1].y + middle[1].height / 2, 55, 0.5);
+
+		/* One element lines up with the widget instead. */
+		const std::vector<Rect> one = align_rects({{10, 10, 100, 20}}, Align::HorizontalCenter, {0, 0, W, H});
+		check_near("align one: centred in the widget", one[0].x, 270, 0.001);
+	}
+
+	/* Distributing leaves the outermost two alone and the gaps equal. */
+	{
+		const std::vector<Rect> rects = {{0, 0, 20, 10}, {200, 0, 20, 10}, {30, 0, 40, 10}, {100, 0, 20, 10}};
+		const std::vector<Rect> spread = distribute_rects(rects, true);
+		check_near("distribute: first kept", spread[0].x, 0, 0.001);
+		check_near("distribute: last kept", spread[1].x, 200, 0.001);
+
+		/* 220 wide, 100 of boxes, 3 gaps of 40. */
+		check_near("distribute: second", spread[2].x, 60, 0.5);
+		check_near("distribute: third", spread[3].x, 140, 0.5);
+
+		const std::vector<Rect> two = distribute_rects({{0, 0, 10, 10}, {50, 0, 10, 10}}, true);
+		check_near("distribute: two left alone", two[1].x, 50, 0.001);
+	}
+
 	return test::finish();
 }

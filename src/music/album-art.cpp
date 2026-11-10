@@ -120,10 +120,10 @@ bool read_embedded_art(const std::string &path, AlbumArtData &out)
 	out.bytes.clear();
 	out.mime.clear();
 
-	if (path.empty() || is_url(path))
+	if (path.empty())
 		return false;
 
-	FormatPtr format = open_input(path, false, nullptr, nullptr);
+	FormatPtr format = open_input(path, nullptr, nullptr);
 	if (!format)
 		return false;
 
@@ -152,7 +152,7 @@ bool read_embedded_art(const std::string &path, AlbumArtData &out)
 
 std::string find_sidecar_art(const std::string &path)
 {
-	if (path.empty() || is_url(path))
+	if (path.empty())
 		return std::string();
 
 	const std::string directory = directory_of(path);

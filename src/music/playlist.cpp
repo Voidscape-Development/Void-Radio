@@ -33,7 +33,7 @@ std::string PlaylistEntry::display_title() const
 	if (!tags.title.empty())
 		return tags.title;
 
-	return url ? path : file_stem(path);
+	return file_stem(path);
 }
 
 std::string PlaylistEntry::display_artist() const
@@ -99,10 +99,10 @@ std::vector<std::string> expand_paths(const std::vector<std::string> &paths, boo
 		if (path.empty())
 			continue;
 
-		if (is_url(path)) {
-			out.push_back(path);
+		/* Internet streams used to be playable. A scene collection
+		 * saved back then can still list them; they are left out. */
+		if (is_url(path))
 			continue;
-		}
 
 		/* A path is only treated as a folder when it opens as one. */
 		os_dir_t *dir = os_opendir(path.c_str());
@@ -234,6 +234,24 @@ int Playlist::peek_next(RepeatMode mode) const
 
 	if ((size_t)(pos + 1) < order_.size())
 		return order_[(size_t)pos + 1];
+
+	return mode == RepeatMode::All ? order_.front() : -1;
+}
+
+int Playlist::peek_after(int entry_index, RepeatMode mode) const
+{
+	if (order_.empty())
+		return -1;
+
+	if (mode == RepeatMode::One && at(entry_index))
+		return entry_index;
+
+	const auto it = std::find(order_.begin(), order_.end(), entry_index);
+	if (it == order_.end())
+		return order_.front();
+
+	if (it + 1 != order_.end())
+		return *(it + 1);
 
 	return mode == RepeatMode::All ? order_.front() : -1;
 }

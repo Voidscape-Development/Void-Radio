@@ -18,8 +18,12 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 
 #include <obs-module.h>
 #include <plugin-support.h>
+#include <util/platform.h>
 
 #include "filters/music-info-filter.hpp"
+#include "filters/music-reactive-filter.hpp"
+#include "integrations/websocket.hpp"
+#include "music/loudness-scan.hpp"
 #include "music/music-source.hpp"
 #include "sources/progress-bar-source.hpp"
 
@@ -50,9 +54,21 @@ MODULE_EXPORT const char *obs_module_description(void)
 
 bool obs_module_load(void)
 {
+	/* Measured loudness is kept between sessions, so a library is only
+	 * measured once. */
+	if (char *dir = obs_module_config_path("")) {
+		os_mkdirs(dir);
+		bfree(dir);
+	}
+	if (char *cache = obs_module_config_path("loudness-cache.tsv")) {
+		vr::set_loudness_cache_file(cache);
+		bfree(cache);
+	}
+
 	vr::register_music_source();
 	vr::register_progress_bar_source();
 	vr::register_music_info_filter();
+	vr::register_music_reactive_filter();
 
 #ifdef VOID_RADIO_ENABLE_WIDGET
 	vr::register_music_widget_source();
@@ -67,6 +83,9 @@ bool obs_module_load(void)
  * the dock is registered here rather than in obs_module_load. */
 void obs_module_post_load(void)
 {
+	/* obs-websocket asks for vendors to register here, once it is up. */
+	vr::register_websocket_vendor();
+
 #ifdef VOID_RADIO_ENABLE_DOCK
 	vr::register_now_playing_dock();
 #endif

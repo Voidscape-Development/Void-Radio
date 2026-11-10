@@ -19,6 +19,8 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include "music/player.hpp"
 
 #include <algorithm>
+#include <cmath>
+#include <cstring>
 
 namespace vr {
 
@@ -35,6 +37,26 @@ constexpr int64_t SEEK_FADE_MS = 15;
 /* Tracks still fading out under a crossfade. Rapid skipping would otherwise
  * stack them up without limit. */
 constexpr size_t MAX_OUTGOING = 3;
+
+/* Skipping silence: at most this much is skipped at the start of a track, and
+ * a track ends once this much of its last stretch has been quiet. Only the end
+ * of a track is watched, so a quiet passage in the middle never cuts it off. */
+constexpr int64_t MAX_LEAD_TRIM_MS = 15000;
+constexpr int64_t TAIL_WINDOW_MS = 30000;
+constexpr int64_t TAIL_QUIET_MS = 1500;
+
+/* How long a change of level takes, so a loudness that arrives mid-track is
+ * not a jump. */
+constexpr int64_t LEVEL_RAMP_MS = 400;
+
+/* How far levelling will go either way. */
+constexpr float MAX_CUT_DB = -24.0f;
+constexpr float MAX_BOOST_DB = 18.0f;
+
+float db_to_linear(float db)
+{
+	return std::pow(10.0f, db / 20.0f);
+}
 
 /* Stands in for a deck the factory could not make, so that failing to open a
  * file goes through exactly the same path as failing to decode one. */
@@ -75,6 +97,7 @@ void Player::set_settings(const PlayerSettings &settings)
 		entries_version_++;
 
 	settings_ = settings;
+	refresh_levels();
 }
 
 void Player::set_entries(std::vector<PlaylistEntry> entries)
@@ -91,6 +114,112 @@ void Player::set_entries(std::vector<PlaylistEntry> entries)
 	playlist_.set_entries(std::move(entries));
 	playlist_.set_shuffle(settings_.shuffle);
 	entries_version_++;
+
+	/* Queued tracks that have left the playlist leave the queue. */
+	for (auto it = queue_.begin(); it != queue_.end();) {
+		if (playlist_.index_of(*it) < 0)
+			it = queue_.erase(it);
+		else
+			++it;
+	}
+	if (!resume_path_.empty() && playlist_.index_of(resume_path_) < 0)
+		resume_path_.clear();
+}
+
+void Player::queue_track(const std::string &path, bool next)
+{
+	if (playlist_.index_of(path) < 0)
+		return;
+
+	if (next)
+		queue_.push_front(path);
+	else
+		queue_.push_back(path);
+
+	entries_version_++;
+}
+
+void Player::unqueue(size_t position)
+{
+	if (position >= queue_.size())
+		return;
+
+	queue_.erase(queue_.begin() + (ptrdiff_t)position);
+	entries_version_++;
+}
+
+void Player::move_queued(size_t from, size_t to)
+{
+	if (from >= queue_.size() || to >= queue_.size() || from == to)
+		return;
+
+	const std::string path = queue_[from];
+	queue_.erase(queue_.begin() + (ptrdiff_t)from);
+	queue_.insert(queue_.begin() + (ptrdiff_t)to, path);
+	entries_version_++;
+}
+
+void Player::clear_queue()
+{
+	if (queue_.empty())
+		return;
+
+	queue_.clear();
+	entries_version_++;
+}
+
+int Player::peek_following() const
+{
+	if (settings_.repeat == RepeatMode::One && playlist_.current() >= 0)
+		return playlist_.current();
+
+	for (const std::string &path : queue_) {
+		const int index = playlist_.index_of(path);
+		if (index >= 0)
+			return index;
+	}
+
+	if (!resume_path_.empty())
+		return playlist_.peek_after(playlist_.index_of(resume_path_), settings_.repeat);
+
+	return playlist_.peek_next(settings_.repeat);
+}
+
+int Player::take_following(RepeatMode repeat)
+{
+	/* Repeating one track keeps repeating it; the queue waits. */
+	if (repeat == RepeatMode::One && playlist_.current() >= 0)
+		return playlist_.advance(repeat);
+
+	while (!queue_.empty()) {
+		const std::string path = queue_.front();
+		queue_.pop_front();
+		entries_version_++;
+
+		const int index = playlist_.index_of(path);
+		if (index < 0)
+			continue;
+
+		/* Remember where the playlist was, once, so it carries on from
+		 * there when the queue runs out. */
+		if (resume_path_.empty()) {
+			const PlaylistEntry *current = playlist_.at(playlist_.current());
+			if (current)
+				resume_path_ = current->path;
+		}
+
+		playlist_.set_current(index);
+		return index;
+	}
+
+	if (!resume_path_.empty()) {
+		const int resume = playlist_.index_of(resume_path_);
+		resume_path_.clear();
+		if (resume >= 0)
+			playlist_.set_current(resume);
+	}
+
+	return playlist_.advance(repeat);
 }
 
 void Player::set_tags(const std::string &path, const Tags &tags)
@@ -102,17 +231,67 @@ void Player::set_tags(const std::string &path, const Tags &tags)
 	entry->tags = tags;
 	entry->tags_loaded = true;
 	entries_version_++;
+
+	refresh_levels(&path);
+}
+
+float Player::level_for(const Tags &tags) const
+{
+	if (settings_.level_mode == LevelMode::Off)
+		return 1.0f;
+
+	float loudness = tags.track_loudness;
+	float peak = tags.track_peak;
+
+	if (settings_.level_mode == LevelMode::Album && std::isfinite(tags.album_loudness)) {
+		loudness = tags.album_loudness;
+		if (tags.album_peak > 0.0f)
+			peak = tags.album_peak;
+	}
+
+	if (!std::isfinite(loudness))
+		return 1.0f;
+
+	const float db = std::clamp(settings_.level_target - loudness, MAX_CUT_DB, MAX_BOOST_DB);
+	float gain = db_to_linear(db);
+
+	/* Never louder than the track's own peak allows. */
+	if (settings_.level_no_clip && peak > 0.0f)
+		gain = std::min(gain, 1.0f / peak);
+
+	return gain;
+}
+
+void Player::refresh_levels(const std::string *path)
+{
+	const auto update = [this, path](Voice *voice) {
+		if (!voice || (path && voice->path != *path))
+			return;
+		const PlaylistEntry *entry = playlist_.at(playlist_.index_of(voice->path));
+		voice->level_target = entry ? level_for(entry->tags) : 1.0f;
+	};
+
+	update(current_.get());
+	update(prefetch_.get());
+	for (auto &voice : outgoing_)
+		update(voice.get());
 }
 
 std::string Player::next_untagged() const
 {
-	const auto wants_tags = [](const PlaylistEntry *entry) {
-		return entry && !entry->tags_loaded && !entry->url;
+	const bool measure = wants_measure();
+	const auto wants_tags = [measure](const PlaylistEntry *entry) {
+		if (!entry)
+			return false;
+		if (!entry->tags_loaded)
+			return true;
+		return measure && !entry->tags.measuring && !entry->tags.loudness_checked &&
+		       !std::isfinite(entry->tags.track_loudness);
 	};
 
 	/* The playing track and the one after it first, so that what is on
 	 * screen fills in straight away. */
-	for (int candidate : {playlist_.current(), playlist_.peek_next(settings_.repeat)}) {
+	for (int candidate : {playlist_.current(), peek_following()}) {
 		const PlaylistEntry *entry = playlist_.at(candidate);
 		if (wants_tags(entry))
 			return entry->path;
@@ -220,6 +399,17 @@ void Player::next()
 
 void Player::previous()
 {
+	/* Back from a queued track goes back to the playlist track it took
+	 * over from. */
+	if (!resume_path_.empty()) {
+		const int resume = playlist_.index_of(resume_path_);
+		resume_path_.clear();
+		if (resume >= 0) {
+			start_entry(resume, manual_crossfade_ms());
+			return;
+		}
+	}
+
 	const int target = playlist_.step_back();
 	if (target >= 0)
 		start_entry(target, manual_crossfade_ms());
@@ -251,6 +441,11 @@ void Player::seek(int64_t ms)
 	/* The track may now have further to run than the crossfade point. */
 	crossfade_started_ = false;
 
+	/* A seek lands where it was asked to, silence or not. */
+	current_->trim_lead = false;
+	current_->quiet_frames = 0;
+	current_->ended_early = false;
+
 	GainEnvelope &gain = current_->gain;
 	if (transport_ == PlayState::Playing && pending_ == Pending::None && !gain.fading() && gain.target() >= 1.0) {
 		gain.set(0.0);
@@ -263,6 +458,8 @@ void Player::play_index(int index)
 	if (!playlist_.at(index))
 		return;
 
+	/* Picking a track by hand is where the playlist carries on from. */
+	resume_path_.clear();
 	start_entry(index, manual_crossfade_ms());
 }
 
@@ -298,6 +495,9 @@ std::unique_ptr<Player::Voice> Player::make_voice(int entry_index)
 
 	if (!voice->deck)
 		voice->deck = std::make_unique<FailedDeck>();
+
+	voice->level = voice->level_target = level_for(entry->tags);
+	voice->trim_lead = settings_.trim_silence;
 
 	return voice;
 }
@@ -363,7 +563,7 @@ void Player::advance(int crossfade_ms, bool user_initiated)
 	if (user_initiated && repeat == RepeatMode::One)
 		repeat = RepeatMode::All;
 
-	const int target = playlist_.advance(repeat);
+	const int target = take_following(repeat);
 
 	if (target < 0) {
 		if (user_initiated)
@@ -458,12 +658,10 @@ void Player::maybe_prefetch()
 	if (remaining > PREFETCH_MS + std::max(0, settings_.crossfade_ms))
 		return;
 
-	const int next = playlist_.peek_next(settings_.repeat);
+	const int next = peek_following();
 	const PlaylistEntry *entry = playlist_.at(next);
 
-	/* A stream holds a connection open for as long as its deck lives, so
-	 * one is only opened when it is actually going to play. */
-	if (!entry || entry->url)
+	if (!entry)
 		return;
 
 	prefetch_ = make_voice(next);
@@ -489,7 +687,7 @@ void Player::maybe_crossfade()
 
 	/* The last track of a playlist that is not repeating plays out in full
 	 * rather than fading into nothing. */
-	if (playlist_.peek_next(settings_.repeat) < 0)
+	if (peek_following() < 0)
 		return;
 
 	advance((int)effective, false);
@@ -501,8 +699,102 @@ void Player::maybe_crossfade()
 
 bool Player::finished(const Voice &voice)
 {
+	if (voice.ended_early)
+		return true;
+
 	const Deck::State state = voice.deck->state();
 	return state == Deck::State::Ended || state == Deck::State::Failed;
+}
+
+size_t Player::trim_lead(Voice &voice, float *const *buffers, size_t frames, size_t got)
+{
+	const float threshold = db_to_linear(settings_.trim_threshold_db);
+	const uint64_t limit = ms_frames(MAX_LEAD_TRIM_MS);
+
+	/* Reads on through whatever the deck has buffered, so skipping a few
+	 * seconds of silence takes a block or two rather than a few seconds. */
+	while (got > 0) {
+		size_t first = got;
+		for (size_t i = 0; i < got && first == got; i++) {
+			for (uint32_t ch = 0; ch < format_.channels; ch++) {
+				if (std::fabs(buffers[ch][i]) > threshold) {
+					first = i;
+					break;
+				}
+			}
+		}
+
+		if (first < got) {
+			if (first > 0) {
+				for (uint32_t ch = 0; ch < format_.channels; ch++)
+					std::memmove(buffers[ch], buffers[ch] + first, (got - first) * sizeof(float));
+			}
+			voice.trim_lead = false;
+			return got - first;
+		}
+
+		voice.lead_dropped += got;
+		if (voice.lead_dropped >= limit) {
+			/* Long enough to be on purpose: play it after all. */
+			voice.trim_lead = false;
+			return 0;
+		}
+
+		got = voice.deck->read(buffers, frames);
+	}
+
+	return 0;
+}
+
+void Player::watch_tail(Voice &voice, float *const *buffers, size_t got)
+{
+	const int64_t duration = voice.deck->duration_ms();
+	if (duration <= 0 || voice.deck->position_ms() < duration - TAIL_WINDOW_MS)
+		return;
+
+	const float threshold = db_to_linear(settings_.trim_threshold_db);
+
+	float peak = 0.0f;
+	for (uint32_t ch = 0; ch < format_.channels; ch++)
+		for (size_t i = 0; i < got; i++)
+			peak = std::max(peak, std::fabs(buffers[ch][i]));
+
+	if (peak > threshold) {
+		voice.quiet_frames = 0;
+		return;
+	}
+
+	voice.quiet_frames += got;
+	if (voice.quiet_frames >= ms_frames(TAIL_QUIET_MS))
+		voice.ended_early = true;
+}
+
+void Player::apply_level(Voice &voice, float *const *buffers, size_t got)
+{
+	const float start = voice.level;
+	/* Settles within about LEVEL_RAMP_MS, smoothly, however the blocks
+	 * fall. */
+	const float tau = (float)std::max<uint64_t>(1, ms_frames(LEVEL_RAMP_MS)) / 4.0f;
+	float end = start + (voice.level_target - start) * (1.0f - std::exp(-(float)got / tau));
+	if (std::fabs(end - voice.level_target) < 1e-4f)
+		end = voice.level_target;
+
+	voice.level = end;
+
+	if (start == 1.0f && end == 1.0f)
+		return;
+
+	for (uint32_t ch = 0; ch < format_.channels; ch++) {
+		float *data = buffers[ch];
+		if (start == end) {
+			for (size_t i = 0; i < got; i++)
+				data[i] *= end;
+		} else {
+			const float step = (end - start) / (float)got;
+			for (size_t i = 0; i < got; i++)
+				data[i] *= start + step * (float)i;
+		}
+	}
 }
 
 size_t Player::mix_voice(Voice &voice, float *const *out, size_t offset, size_t frames)
@@ -515,10 +807,23 @@ size_t Player::mix_voice(Voice &voice, float *const *out, size_t offset, size_t 
 		buffers[ch] = scratch_[ch].data();
 	}
 
-	const size_t got = voice.deck->read(buffers, frames);
+	size_t got = voice.deck->read(buffers, frames);
+
+	if (voice.trim_lead) {
+		got = trim_lead(voice, buffers, frames, got);
+
+		/* Nothing to hear yet: a fade in waits for the sound to start
+		 * rather than running out over the silence. */
+		if (!got && voice.trim_lead)
+			return 0;
+	}
+
+	if (settings_.trim_silence && got)
+		watch_tail(voice, buffers, got);
 
 	voice.gain.apply(buffers, format_.channels, got);
 	voice.gain.advance(frames - got);
+	apply_level(voice, buffers, got);
 
 	for (uint32_t ch = 0; ch < format_.channels; ch++) {
 		float *dst = out[ch] + offset;
@@ -619,13 +924,22 @@ void Player::fill_snapshot(Snapshot &snapshot) const
 		snapshot.genre = entry->tags.genre;
 		snapshot.year = entry->tags.year;
 		snapshot.track = entry->tags.track;
-		snapshot.seekable = !entry->url && snapshot.duration_ms > 0 && current_ && current_->deck->seekable();
+		snapshot.album_artist = entry->tags.album_artist;
+		snapshot.composer = entry->tags.composer;
+		snapshot.comment = entry->tags.comment;
+		snapshot.bpm = entry->tags.bpm;
+		snapshot.disc = entry->tags.disc;
+		snapshot.codec = entry->tags.codec;
+		snapshot.bitrate = entry->tags.bitrate;
+		snapshot.samplerate = entry->tags.samplerate;
+		snapshot.seekable = snapshot.duration_ms > 0 && current_ && current_->deck->seekable();
 	}
 
-	const PlaylistEntry *next_entry = playlist_.at(playlist_.peek_next(settings_.repeat));
+	const PlaylistEntry *next_entry = playlist_.at(peek_following());
 	if (next_entry) {
 		snapshot.next_title = next_entry->display_title();
 		snapshot.next_artist = next_entry->display_artist();
+		snapshot.next_album = next_entry->tags.album;
 	}
 }
 

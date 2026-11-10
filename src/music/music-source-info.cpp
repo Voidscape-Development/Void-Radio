@@ -69,17 +69,115 @@ void source_defaults(obs_data_t *settings)
 	obs_data_set_default_bool(settings, "play_on_start", true);
 	obs_data_set_default_bool(settings, "keep_playing_when_hidden", true);
 	obs_data_set_default_bool(settings, "skip_on_error", true);
+
+	obs_data_set_default_int(settings, "level_mode", (int64_t)LevelMode::Off);
+	obs_data_set_default_double(settings, "level_target", -16.0);
+	obs_data_set_default_bool(settings, "level_measure", true);
+	obs_data_set_default_bool(settings, "level_no_clip", true);
+
+	obs_data_set_default_bool(settings, "trim_silence", false);
+	obs_data_set_default_double(settings, "trim_threshold", -50.0);
+
+	obs_data_set_default_bool(settings, "duck_enable", false);
+	obs_data_set_default_string(settings, "duck_source", "");
+	obs_data_set_default_double(settings, "duck_threshold", -35.0);
+	obs_data_set_default_double(settings, "duck_depth", 12.0);
+	obs_data_set_default_int(settings, "duck_attack_ms", 80);
+	obs_data_set_default_int(settings, "duck_hold_ms", 500);
+	obs_data_set_default_int(settings, "duck_release_ms", 800);
+}
+
+bool level_mode_changed(obs_properties_t *props, obs_property_t *, obs_data_t *settings)
+{
+	const bool on = (LevelMode)obs_data_get_int(settings, "level_mode") != LevelMode::Off;
+	for (const char *name : {"level_target", "level_measure", "level_no_clip"})
+		obs_property_set_visible(obs_properties_get(props, name), on);
+	return true;
+}
+
+bool trim_changed(obs_properties_t *props, obs_property_t *, obs_data_t *settings)
+{
+	obs_property_set_visible(obs_properties_get(props, "trim_threshold"),
+				 obs_data_get_bool(settings, "trim_silence"));
+	return true;
+}
+
+void add_level_group(obs_properties_t *props)
+{
+	obs_properties_t *group = obs_properties_create();
+
+	obs_property_t *mode = obs_properties_add_list(group, "level_mode", obs_module_text("Music.Level"),
+						       OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+	obs_property_list_add_int(mode, obs_module_text("Music.Level.Off"), (int64_t)LevelMode::Off);
+	obs_property_list_add_int(mode, obs_module_text("Music.Level.Track"), (int64_t)LevelMode::Track);
+	obs_property_list_add_int(mode, obs_module_text("Music.Level.Album"), (int64_t)LevelMode::Album);
+	obs_property_set_long_description(mode, obs_module_text("Music.Level.Description"));
+	obs_property_set_modified_callback(mode, level_mode_changed);
+
+	obs_property_t *target = obs_properties_add_float_slider(
+		group, "level_target", obs_module_text("Music.Level.Target"), -30.0, -6.0, 0.5);
+	obs_property_float_set_suffix(target, " LUFS");
+	obs_property_set_long_description(target, obs_module_text("Music.Level.Target.Description"));
+
+	obs_property_t *measure =
+		obs_properties_add_bool(group, "level_measure", obs_module_text("Music.Level.Measure"));
+	obs_property_set_long_description(measure, obs_module_text("Music.Level.Measure.Description"));
+
+	obs_property_t *no_clip =
+		obs_properties_add_bool(group, "level_no_clip", obs_module_text("Music.Level.NoClip"));
+	obs_property_set_long_description(no_clip, obs_module_text("Music.Level.NoClip.Description"));
+
+	obs_property_t *trim = obs_properties_add_bool(group, "trim_silence", obs_module_text("Music.Trim"));
+	obs_property_set_long_description(trim, obs_module_text("Music.Trim.Description"));
+	obs_property_set_modified_callback(trim, trim_changed);
+
+	obs_property_t *threshold = obs_properties_add_float_slider(
+		group, "trim_threshold", obs_module_text("Music.Trim.Threshold"), -80.0, -20.0, 1.0);
+	obs_property_float_set_suffix(threshold, " dB");
+
+	obs_properties_add_group(props, "level_group", obs_module_text("Music.Group.Level"), OBS_GROUP_NORMAL, group);
+}
+
+void add_duck_group(obs_properties_t *props, MusicSource *music)
+{
+	obs_properties_t *group = obs_properties_create();
+
+	obs_property_t *source = obs_properties_add_list(group, "duck_source", obs_module_text("Music.Duck.Source"),
+							 OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
+	MusicSource::list_duck_sources(source, music ? music->source() : nullptr);
+	obs_property_set_long_description(source, obs_module_text("Music.Duck.Source.Description"));
+
+	obs_property_t *threshold = obs_properties_add_float_slider(
+		group, "duck_threshold", obs_module_text("Music.Duck.Threshold"), -60.0, 0.0, 1.0);
+	obs_property_float_set_suffix(threshold, " dB");
+	obs_property_set_long_description(threshold, obs_module_text("Music.Duck.Threshold.Description"));
+
+	obs_property_t *depth = obs_properties_add_float_slider(group, "duck_depth",
+								obs_module_text("Music.Duck.Depth"), 0.0, 40.0, 0.5);
+	obs_property_float_set_suffix(depth, " dB");
+
+	obs_property_t *attack = obs_properties_add_int_slider(group, "duck_attack_ms",
+							       obs_module_text("Music.Duck.Attack"), 0, 2000, 10);
+	obs_property_int_set_suffix(attack, " ms");
+
+	obs_property_t *hold =
+		obs_properties_add_int_slider(group, "duck_hold_ms", obs_module_text("Music.Duck.Hold"), 0, 5000, 50);
+	obs_property_int_set_suffix(hold, " ms");
+
+	obs_property_t *release = obs_properties_add_int_slider(group, "duck_release_ms",
+								obs_module_text("Music.Duck.Release"), 0, 5000, 50);
+	obs_property_int_set_suffix(release, " ms");
+
+	obs_properties_add_group(props, "duck_enable", obs_module_text("Music.Group.Duck"), OBS_GROUP_CHECKABLE, group);
 }
 
 obs_properties_t *source_properties(void *data)
 {
-	UNUSED_PARAMETER(data);
-
 	obs_properties_t *props = obs_properties_create();
 
 	obs_properties_add_editable_list(props, "playlist", obs_module_text("Music.Playlist"),
-					 OBS_EDITABLE_LIST_TYPE_FILES_AND_URLS,
-					 obs_module_text("Music.Playlist.Filter"), nullptr);
+					 OBS_EDITABLE_LIST_TYPE_FILES, obs_module_text("Music.Playlist.Filter"),
+					 nullptr);
 
 	obs_properties_add_bool(props, "recurse_dirs", obs_module_text("Music.RecurseDirs"));
 	obs_properties_add_bool(props, "shuffle", obs_module_text("Music.Shuffle"));
@@ -114,6 +212,9 @@ obs_properties_t *source_properties(void *data)
 	obs_property_set_long_description(keep_playing, obs_module_text("Music.KeepPlaying.Description"));
 
 	obs_properties_add_bool(props, "skip_on_error", obs_module_text("Music.SkipOnError"));
+
+	add_level_group(props);
+	add_duck_group(props, static_cast<MusicSource *>(data));
 
 	return props;
 }

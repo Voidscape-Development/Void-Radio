@@ -76,7 +76,7 @@ void AudioDecoder::reset_decode_state()
 	need_sync_ = true;
 }
 
-bool AudioDecoder::open(const std::string &path, bool is_url, const AudioFormat &format, const InterruptFn *interrupt,
+bool AudioDecoder::open(const std::string &path, const AudioFormat &format, const InterruptFn *interrupt,
 			std::string *error)
 {
 	close();
@@ -94,12 +94,11 @@ bool AudioDecoder::open(const std::string &path, bool is_url, const AudioFormat 
 
 	out_ = format;
 	path_ = path;
-	is_url_ = is_url;
 	interrupt_ = interrupt;
 	layout_from_mask(out_layout_, format.channel_mask, format.channels);
 
 	std::string open_error;
-	format_ = open_input(path, is_url, interrupt, &open_error);
+	format_ = open_input(path, interrupt, &open_error);
 	if (!format_)
 		return fail("could not open: " + open_error);
 
@@ -382,7 +381,7 @@ bool AudioDecoder::seek(int64_t ms)
 		const std::string path = path_;
 		const InterruptFn *interrupt = interrupt_;
 
-		if (!open(path, is_url_, out_, interrupt)) {
+		if (!open(path, out_, interrupt)) {
 			error_ = "seek failed (" + reason + ") and the file could not be reopened";
 			return false;
 		}

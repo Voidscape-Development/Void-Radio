@@ -21,6 +21,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 namespace vr::widget {
 
@@ -42,6 +43,8 @@ struct StyleTokens {
 	bool panel = true;
 	BackgroundType panel_type = BackgroundType::Color;
 	uint32_t panel_color = 0xF0191414;
+	bool panel_accent = false;
+	AccentTone panel_tone = AccentTone::Dark;
 	double blur = 70.0;
 	double darken = 45.0;
 	double desaturate = 20.0;
@@ -59,6 +62,14 @@ struct StyleTokens {
 	uint32_t secondary = white(0xC2);
 	uint32_t muted = white(0x94);
 	bool text_shadow = false;
+
+	/* A coloured halo instead of a drop shadow: the shadow follows the
+	 * accent, sits under the text and spreads wide. */
+	bool text_glow = false;
+
+	/* The subtitle takes a tone of the accent instead of a grey. */
+	bool subtitle_accent = false;
+	AccentTone subtitle_tone = AccentTone::Light;
 
 	uint32_t bar_track = white(0x38);
 };
@@ -99,6 +110,42 @@ StyleTokens tokens_for(WidgetStyle style)
 		t.radius = 24.0;
 		t.art = ArtShape::Circle;
 		t.spin = true;
+		break;
+
+	case WidgetStyle::Neon:
+		t.panel_color = 0xEC0E0808;
+		t.radius = 14.0;
+		t.border = 2.0;
+		t.border_accent = true;
+		t.art_shadow = false;
+		t.text_glow = true;
+		t.subtitle_accent = true;
+		t.subtitle_tone = AccentTone::Light;
+		t.bar_track = white(0x24);
+		break;
+
+	case WidgetStyle::Cassette:
+		/* Warm brown plastic with a cream label. */
+		t.panel_color = 0xF2223040;
+		t.radius = 10.0;
+		t.border = 2.0;
+		t.border_color = 0x58C8E6F0;
+		t.primary = 0xFFD8EEF6;
+		t.secondary = 0xD8B4CCDA;
+		t.muted = 0xA8A0B4C0;
+		t.bar_track = 0x40C8E6F0;
+		break;
+
+	case WidgetStyle::Ticker:
+		/* A strip in the dark tone of the album colour, square cornered,
+		 * meant for a full width bar along the bottom of the screen. */
+		t.panel_color = 0xF0101010;
+		t.panel_accent = true;
+		t.panel_tone = AccentTone::Dark;
+		t.radius = 0.0;
+		t.art = ArtShape::Square;
+		t.art_shadow = false;
+		t.secondary = white(0xD0);
 		break;
 
 	case WidgetStyle::Solid:
@@ -161,10 +208,14 @@ int font_size_of(obs_data_t *data, const std::string &key)
 
 void apply_panel(obs_data_t *out, const StyleTokens &t, double radius)
 {
-	obs_data_set_bool(out, "bg_enable", t.panel);
+	/* A style can leave the panel out, but never puts back one that has
+	 * been hidden. */
+	obs_data_set_bool(out, "bg_enable", t.panel && obs_data_get_bool(out, "bg_enable"));
 	obs_data_set_int(out, "bg_type", (int64_t)t.panel_type);
 	obs_data_set_int(out, "bg_color", t.panel_color);
-	obs_data_set_bool(out, "bg_accent", false);
+	obs_data_set_bool(out, "bg_accent", t.panel_accent);
+	obs_data_set_int(out, "bg_tone", (int64_t)t.panel_tone);
+	obs_data_set_bool(out, "bg_accent2", false);
 	obs_data_set_double(out, "bg_blur", t.blur);
 	obs_data_set_double(out, "bg_darken", t.darken);
 	obs_data_set_double(out, "bg_desaturate", t.desaturate);
@@ -226,16 +277,32 @@ void apply_line(obs_data_t *out, const std::string &prefix, const StyleTokens &t
 	else if (role == LineRole::Detail || role == LineRole::Time)
 		color = t.muted;
 
+	const bool accent = t.subtitle_accent && role == LineRole::Subtitle;
+
 	obs_data_set_int(out, key_for(prefix, "color").c_str(), color);
-	obs_data_set_bool(out, key_for(prefix, "accent").c_str(), false);
+	obs_data_set_bool(out, key_for(prefix, "accent").c_str(), accent);
+	obs_data_set_int(out, key_for(prefix, "tone").c_str(),
+			 (int64_t)(accent ? t.subtitle_tone : AccentTone::Accent));
 	obs_data_set_bool(out, key_for(prefix, "gradient").c_str(), false);
 	obs_data_set_double(out, key_for(prefix, "outline").c_str(), 0.0);
 
-	obs_data_set_bool(out, key_for(prefix, "shadow").c_str(), t.text_shadow);
-	obs_data_set_double(out, key_for(prefix, "shadow_x").c_str(), 0.0);
-	obs_data_set_double(out, key_for(prefix, "shadow_y").c_str(), 2.0);
-	obs_data_set_double(out, key_for(prefix, "shadow_blur").c_str(), 8.0);
-	obs_data_set_int(out, key_for(prefix, "shadow_color").c_str(), 0xC0000000);
+	if (t.text_glow) {
+		/* Only the title glows; a halo on every line turns to mush. */
+		const bool glow = role == LineRole::Title;
+		obs_data_set_bool(out, key_for(prefix, "shadow").c_str(), glow);
+		obs_data_set_double(out, key_for(prefix, "shadow_x").c_str(), 0.0);
+		obs_data_set_double(out, key_for(prefix, "shadow_y").c_str(), 0.0);
+		obs_data_set_double(out, key_for(prefix, "shadow_blur").c_str(), std::max(6.0, size * 0.45));
+		obs_data_set_int(out, key_for(prefix, "shadow_color").c_str(), 0xFFFFFFFF);
+		obs_data_set_bool(out, key_for(prefix, "shadow_accent").c_str(), true);
+	} else {
+		obs_data_set_bool(out, key_for(prefix, "shadow").c_str(), t.text_shadow);
+		obs_data_set_double(out, key_for(prefix, "shadow_x").c_str(), 0.0);
+		obs_data_set_double(out, key_for(prefix, "shadow_y").c_str(), 2.0);
+		obs_data_set_double(out, key_for(prefix, "shadow_blur").c_str(), 8.0);
+		obs_data_set_int(out, key_for(prefix, "shadow_color").c_str(), 0xC0000000);
+		obs_data_set_bool(out, key_for(prefix, "shadow_accent").c_str(), false);
+	}
 
 	obs_data_set_double(out, key_for(prefix, "letter_spacing").c_str(), 0.0);
 	obs_data_set_double(out, key_for(prefix, "line_height").c_str(), 100.0);
@@ -303,6 +370,12 @@ void add_design_defaults(obs_data_t *settings)
 	obs_data_set_default_bool(settings, "show_advanced", false);
 	obs_data_set_default_bool(settings, "free_backdrop", false);
 
+	/* Elements that keep their own look under a named style, as a line
+	 * with its own style does. */
+	obs_data_set_default_bool(settings, "bg_custom", false);
+	obs_data_set_default_bool(settings, "art_custom", false);
+	obs_data_set_default_bool(settings, "bar_custom", false);
+
 	static const LineRole ROLES[TEXT_SLOTS] = {LineRole::Title, LineRole::Subtitle, LineRole::Detail,
 						   LineRole::Time,  LineRole::Detail,   LineRole::Detail};
 
@@ -363,10 +436,17 @@ obs_data_t *resolve_settings(obs_data_t *settings)
 	const ArtShape shape = (ArtShape)obs_data_get_int(out, "art_shape");
 	const LongText long_text = (LongText)obs_data_get_int(out, "long_text");
 
+	const bool own_panel = obs_data_get_bool(out, "bg_custom");
+	const bool own_art = obs_data_get_bool(out, "art_custom");
+	const bool own_bar = obs_data_get_bool(out, "bar_custom");
+
 	if (styled) {
-		apply_panel(out, tokens, radius);
-		apply_art(out, tokens, shape, radius);
-		apply_bar(out, tokens);
+		if (!own_panel)
+			apply_panel(out, tokens, radius);
+		if (!own_art)
+			apply_art(out, tokens, shape, radius);
+		if (!own_bar)
+			apply_bar(out, tokens);
 	} else if (obs_data_get_bool(out, "radius_override")) {
 		obs_data_set_double(out, "bg_corner_radius", radius);
 	}
@@ -442,7 +522,7 @@ obs_data_t *resolve_settings(obs_data_t *settings)
 		}
 
 		set_geometry(out, "bar_", result.bar.visible, result.bar);
-		if (styled)
+		if (styled && !own_bar)
 			obs_data_set_double(out, "bar_corner_radius", result.bar.height * 0.5);
 	} else {
 		if (obs_data_get_bool(out, "free_backdrop"))
@@ -459,7 +539,7 @@ obs_data_t *resolve_settings(obs_data_t *settings)
 			apply_line(out, prefix, tokens, line.role, font, box / LINE_BOX_RATIO, long_text, false);
 		}
 
-		if (styled)
+		if (styled && !own_bar)
 			obs_data_set_double(out, "bar_corner_radius",
 					    (double)obs_data_get_int(out, "bar_height") * 0.5);
 	}
@@ -472,6 +552,16 @@ obs_data_t *resolve_settings(obs_data_t *settings)
 /* Editing                                                                    */
 /* ------------------------------------------------------------------------- */
 
+bool is_always_free(const std::string &prefix)
+{
+	return prefix == "viz_" || prefix == "img_" || prefix == "icon_" || prefix == "glow_";
+}
+
+std::string z_key(const std::string &prefix)
+{
+	return prefix + "z";
+}
+
 std::vector<ElementBox> element_boxes(obs_data_t *settings)
 {
 	obs_data_t *resolved = resolve_settings(settings);
@@ -480,6 +570,25 @@ std::vector<ElementBox> element_boxes(obs_data_t *settings)
 	const uint32_t height = (uint32_t)std::max<int64_t>(1, obs_data_get_int(resolved, "height"));
 
 	std::vector<ElementBox> boxes;
+
+	/* The panel is listed so it can be styled, locked and restacked, but it
+	 * always fills the widget, less its inset. */
+	{
+		const float inset = std::max(0.0f, (float)obs_data_get_double(resolved, "bg_inset"));
+		ElementBox panel;
+		panel.prefix = "bg_";
+		panel.label = obs_module_text("Widget.Panel");
+		panel.enabled = obs_data_get_bool(resolved, "bg_enable");
+		panel.z = (int)obs_data_get_int(resolved, "bg_z");
+		panel.box.x = inset;
+		panel.box.y = inset;
+		panel.box.width = std::max(1.0f, (float)width - inset * 2.0f);
+		panel.box.height = std::max(1.0f, (float)height - inset * 2.0f);
+		panel.box.visible = panel.enabled;
+		panel.movable = false;
+		panel.locked = obs_data_get_bool(settings, "bg_locked");
+		boxes.push_back(panel);
+	}
 
 	const auto add = [&](const std::string &prefix, const char *label) {
 		const Geometry g = read_geometry_of(resolved, prefix);
@@ -493,16 +602,32 @@ std::vector<ElementBox> element_boxes(obs_data_t *settings)
 		element.box.width = g.width;
 		element.box.height = g.height;
 		element.box.visible = g.enabled;
+		element.always_free = is_always_free(prefix);
+		element.locked = obs_data_get_bool(settings, key_for(prefix, "locked").c_str());
 		boxes.push_back(element);
 	};
 
+	add("glow_", "Widget.Glow");
 	add("art_", "Widget.Art");
 	for (int slot = 0; slot < TEXT_SLOTS; slot++)
 		add(text_prefix(slot), line_label_key(slot));
 	add("bar_", "Widget.Bar");
+	add("viz_", "Widget.Visualizer");
+	add("img_", "Widget.Image");
+	add("icon_", "Widget.Icon");
 
 	obs_data_release(resolved);
 	return boxes;
+}
+
+void set_stacking(obs_data_t *settings, const std::vector<std::string> &order)
+{
+	/* Spaced out so a layer typed in by hand can still go between two. */
+	int z = -100;
+	for (const std::string &prefix : order) {
+		obs_data_set_int(settings, z_key(prefix).c_str(), z);
+		z += 10;
+	}
 }
 
 void detach_to_free_placement(obs_data_t *settings)
@@ -511,8 +636,11 @@ void detach_to_free_placement(obs_data_t *settings)
 	if (layout == Arrangement::Free)
 		return;
 
-	for (const ElementBox &element : element_boxes(settings))
+	for (const ElementBox &element : element_boxes(settings)) {
+		if (element.always_free || !element.movable)
+			continue;
 		set_geometry(settings, element.prefix, element.enabled, element.box);
+	}
 
 	obs_data_set_bool(settings, "free_backdrop", layout == Arrangement::Backdrop);
 	obs_data_set_int(settings, "layout", (int64_t)Arrangement::Free);
@@ -543,6 +671,231 @@ void place_element(obs_data_t *settings, const std::string &prefix, const Box &b
 	obs_data_set_int(settings, key_for(prefix, "height").c_str(), (int64_t)g.height);
 
 	obs_data_release(resolved);
+}
+
+/* ------------------------------------------------------------------------- */
+/* Designs                                                                    */
+/* ------------------------------------------------------------------------- */
+
+namespace {
+
+constexpr const char *DESIGN_MARKER = "void_radio_widget_design";
+
+/* What a design never carries: which music source to follow belongs to the
+ * widget, not to how it looks. */
+bool is_binding_key(const char *name)
+{
+	return strcmp(name, "music_source") == 0 || strcmp(name, "music_source_uuid") == 0;
+}
+
+void set_line(obs_data_t *d, int slot, bool enabled, const char *format, LineRole role)
+{
+	const std::string prefix = text_prefix(slot);
+	obs_data_set_bool(d, key_for(prefix, "enable").c_str(), enabled);
+	obs_data_set_string(d, key_for(prefix, "format").c_str(), format);
+	obs_data_set_int(d, key_for(prefix, "role").c_str(), (int64_t)role);
+}
+
+std::string design_json(obs_data_t *d)
+{
+	obs_data_t *wrapper = obs_data_create();
+	obs_data_set_int(wrapper, DESIGN_MARKER, 1);
+	obs_data_set_obj(wrapper, "settings", d);
+	const std::string json = obs_data_get_json(wrapper);
+	obs_data_release(wrapper);
+	obs_data_release(d);
+	return json;
+}
+
+obs_data_t *base_design(Arrangement layout, WidgetStyle style, int width, int height)
+{
+	obs_data_t *d = obs_data_create();
+	obs_data_set_int(d, "layout", (int64_t)layout);
+	obs_data_set_int(d, "style", (int64_t)style);
+	obs_data_set_int(d, "width", width);
+	obs_data_set_int(d, "height", height);
+	return d;
+}
+
+} // namespace
+
+std::string export_design(obs_data_t *settings)
+{
+	obs_data_t *design = obs_data_create();
+
+	for (obs_data_item_t *item = obs_data_first(settings); item; obs_data_item_next(&item)) {
+		const char *name = obs_data_item_get_name(item);
+		if (!name || is_binding_key(name) || !obs_data_item_has_user_value(item))
+			continue;
+
+		switch (obs_data_item_gettype(item)) {
+		case OBS_DATA_STRING:
+			obs_data_set_string(design, name, obs_data_item_get_string(item));
+			break;
+		case OBS_DATA_NUMBER:
+			if (obs_data_item_numtype(item) == OBS_DATA_NUM_DOUBLE)
+				obs_data_set_double(design, name, obs_data_item_get_double(item));
+			else
+				obs_data_set_int(design, name, obs_data_item_get_int(item));
+			break;
+		case OBS_DATA_BOOLEAN:
+			obs_data_set_bool(design, name, obs_data_item_get_bool(item));
+			break;
+		case OBS_DATA_OBJECT: {
+			obs_data_t *obj = obs_data_item_get_obj(item);
+			obs_data_set_obj(design, name, obj);
+			obs_data_release(obj);
+			break;
+		}
+		case OBS_DATA_ARRAY: {
+			obs_data_array_t *array = obs_data_item_get_array(item);
+			obs_data_set_array(design, name, array);
+			obs_data_array_release(array);
+			break;
+		}
+		default:
+			break;
+		}
+	}
+
+	/* Always written, so applying the design never leaves a widget on a
+	 * layout or style it merely defaulted to. */
+	obs_data_set_int(design, "layout", obs_data_get_int(settings, "layout"));
+	obs_data_set_int(design, "style", obs_data_get_int(settings, "style"));
+
+	return design_json(design);
+}
+
+bool apply_design(obs_data_t *settings, const char *json)
+{
+	if (!json || !*json)
+		return false;
+
+	obs_data_t *parsed = obs_data_create_from_json(json);
+	if (!parsed)
+		return false;
+
+	obs_data_t *design = nullptr;
+	if (obs_data_has_user_value(parsed, DESIGN_MARKER))
+		design = obs_data_get_obj(parsed, "settings");
+	else {
+		design = parsed;
+		obs_data_addref(parsed);
+	}
+	obs_data_release(parsed);
+
+	/* A bare object is only taken for a design if it says what layout it
+	 * has, so an unrelated JSON file is refused rather than wiping the
+	 * widget. */
+	if (!design || !obs_data_has_user_value(design, "layout")) {
+		obs_data_release(design);
+		return false;
+	}
+
+	const std::string source = obs_data_get_string(settings, "music_source");
+	const std::string uuid = obs_data_get_string(settings, "music_source_uuid");
+
+	obs_data_clear(settings);
+
+	obs_data_unset_user_value(design, "music_source");
+	obs_data_unset_user_value(design, "music_source_uuid");
+
+	obs_data_apply(settings, design);
+	obs_data_release(design);
+
+	if (!source.empty())
+		obs_data_set_string(settings, "music_source", source.c_str());
+	if (!uuid.empty())
+		obs_data_set_string(settings, "music_source_uuid", uuid.c_str());
+
+	if (!obs_data_has_user_value(settings, "style"))
+		obs_data_set_int(settings, "style", obs_data_get_int(settings, "style"));
+
+	return true;
+}
+
+std::vector<BuiltinDesign> builtin_designs()
+{
+	std::vector<BuiltinDesign> designs;
+
+	{
+		obs_data_t *d = base_design(Arrangement::ArtLeft, WidgetStyle::Glass, 720, 150);
+		set_line(d, 0, true, "{title}", LineRole::Title);
+		set_line(d, 1, true, "{artist}", LineRole::Subtitle);
+		set_line(d, 2, true, "{album}[ · {year}]", LineRole::Detail);
+		designs.push_back({"Preset.LowerThird", design_json(d)});
+	}
+
+	{
+		obs_data_t *d = base_design(Arrangement::ArtLeft, WidgetStyle::Solid, 720, 170);
+		set_line(d, 0, true, "{title}", LineRole::Title);
+		set_line(d, 1, true, "{artist}", LineRole::Subtitle);
+		set_line(d, 2, true, "Up next · {next_title}[ — {next_artist}]", LineRole::Detail);
+		designs.push_back({"Preset.UpNext", design_json(d)});
+	}
+
+	{
+		obs_data_t *d = base_design(Arrangement::Stacked, WidgetStyle::Minimal, 360, 470);
+		set_line(d, 0, true, "{title}", LineRole::Title);
+		set_line(d, 1, true, "{artist}", LineRole::Subtitle);
+		obs_data_set_int(d, "bar_position", (int64_t)BarPlacement::Off);
+		obs_data_set_bool(d, "viz_enable", true);
+		obs_data_set_int(d, "viz_anchor", (int64_t)Anchor::BottomCenter);
+		obs_data_set_double(d, "viz_x", 0.0);
+		obs_data_set_double(d, "viz_y", -10.0);
+		obs_data_set_int(d, "viz_width", 300);
+		obs_data_set_int(d, "viz_height", 36);
+		obs_data_set_int(d, "viz_mode", (int64_t)VizMode::Mirror);
+		designs.push_back({"Preset.BigCover", design_json(d)});
+	}
+
+	{
+		obs_data_t *d = base_design(Arrangement::Compact, WidgetStyle::Ticker, 1280, 56);
+		set_line(d, 0, true, "Now playing · {title}[ — {artist}]", LineRole::Title);
+		set_line(d, 1, false, "", LineRole::Subtitle);
+		obs_data_set_int(d, "bar_position", (int64_t)BarPlacement::BottomEdge);
+		obs_data_set_bool(d, "icon_enable", true);
+		obs_data_set_int(d, "icon_anchor", (int64_t)Anchor::MiddleRight);
+		obs_data_set_double(d, "icon_x", -16.0);
+		obs_data_set_double(d, "icon_y", 0.0);
+		obs_data_set_int(d, "icon_width", 22);
+		obs_data_set_int(d, "icon_height", 22);
+		designs.push_back({"Preset.Ticker", design_json(d)});
+	}
+
+	{
+		obs_data_t *d = base_design(Arrangement::ArtLeft, WidgetStyle::Neon, 680, 170);
+		set_line(d, 0, true, "{title}", LineRole::Title);
+		set_line(d, 1, true, "{artist}", LineRole::Subtitle);
+		obs_data_set_bool(d, "viz_enable", true);
+		obs_data_set_int(d, "viz_anchor", (int64_t)Anchor::TopRight);
+		obs_data_set_double(d, "viz_x", -18.0);
+		obs_data_set_double(d, "viz_y", 18.0);
+		obs_data_set_int(d, "viz_width", 110);
+		obs_data_set_int(d, "viz_height", 34);
+		obs_data_set_int(d, "viz_bands", 16);
+		designs.push_back({"Preset.Neon", design_json(d)});
+	}
+
+	{
+		obs_data_t *d = base_design(Arrangement::ArtLeft, WidgetStyle::Cassette, 640, 160);
+		set_line(d, 0, true, "{title}", LineRole::Title);
+		set_line(d, 1, true, "{artist}", LineRole::Subtitle);
+		set_line(d, 3, true, "{elapsed} / {duration}", LineRole::Time);
+		designs.push_back({"Preset.Cassette", design_json(d)});
+	}
+
+	{
+		obs_data_t *d = base_design(Arrangement::ArtLeft, WidgetStyle::Glass, 560, 130);
+		set_line(d, 0, true, "{title}", LineRole::Title);
+		set_line(d, 1, true, "{artist}", LineRole::Subtitle);
+		obs_data_set_int(d, "popup_mode", (int64_t)PopupMode::OnTrackChange);
+		obs_data_set_int(d, "popup_animation", (int64_t)PopupAnimation::SlideUp);
+		obs_data_set_int(d, "enter_style", (int64_t)EnterStyle::SlideUp);
+		designs.push_back({"Preset.PopIn", design_json(d)});
+	}
+
+	return designs;
 }
 
 } // namespace vr::widget

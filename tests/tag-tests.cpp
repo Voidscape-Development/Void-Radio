@@ -6,9 +6,11 @@
 
 #include "media-fixtures.hpp"
 #include "music/album-art.hpp"
+#include "music/loudness-scan.hpp"
 #include "music/track-tags.hpp"
 #include "test-check.hpp"
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -183,7 +185,6 @@ int main()
 		remove(path.c_str());
 
 		check_true("missing file: no tags", !vr::read_tags("/nonexistent/void-radio.flac", tags));
-		check_true("url: not read", !vr::read_tags("https://example.com/stream.mp3", tags));
 	}
 
 	/* Embedded art: the front cover wins over pictures listed before it. */
@@ -226,8 +227,81 @@ int main()
 		for (const char *name : {"song.flac", "thumb.jpg", "Folder.PNG", "notes.txt"})
 			remove((dir + "/" + name).c_str());
 		rmdir(dir.c_str());
+	}
 
-		check_str("sidecar: url has none", vr::find_sidecar_art("https://example.com/a.mp3"), "");
+	/* Loudness from ReplayGain and R128 values. */
+	{
+		check_true("replaygain: -6.54 dB is -11.46 LUFS",
+			   std::fabs(vr::loudness_from_replaygain("-6.54 dB") + 11.46f) < 0.001f);
+		check_true("replaygain: +2 dB", std::fabs(vr::loudness_from_replaygain(" +2.00 dB") + 20.0f) < 0.001f);
+		check_true("replaygain: junk", std::isnan(vr::loudness_from_replaygain("loud")));
+		check_true("r128: 0 is -23", std::fabs(vr::loudness_from_r128("0") + 23.0f) < 0.001f);
+		check_true("r128: -2560 is -13", std::fabs(vr::loudness_from_r128("-2560") + 13.0f) < 0.001f);
+	}
+
+	/* ReplayGain tags in a real file, and the technical details. */
+	{
+		fixture::Spec spec;
+		spec.format = "flac";
+		spec.codec = "flac";
+		spec.metadata = {{"title", "Gain"},
+				 {"REPLAYGAIN_TRACK_GAIN", "-6.54 dB"},
+				 {"REPLAYGAIN_TRACK_PEAK", "0.988"},
+				 {"REPLAYGAIN_ALBUM_GAIN", "-5.00 dB"}};
+		const std::string path = fixture::temp_path("gain.flac");
+		check_true("gain: written", fixture::write(path, spec));
+
+		vr::Tags tags;
+		check_true("gain: read", vr::read_tags(path, tags));
+		check_true("gain: track loudness", std::fabs(tags.track_loudness + 11.46f) < 0.01f);
+		check_true("gain: track peak", std::fabs(tags.track_peak - 0.988f) < 0.001f);
+		check_true("gain: album loudness", std::fabs(tags.album_loudness + 13.0f) < 0.01f);
+		check_str("gain: codec", tags.codec, "FLAC");
+		check_str("gain: sample rate", tags.samplerate, "48 kHz");
+		remove(path.c_str());
+	}
+
+	/* An untagged file is measured, and the result cached against the
+	 * file's size and time. */
+	{
+		fixture::Spec spec;
+		spec.format = "flac";
+		spec.codec = "flac";
+		spec.duration_ms = 3000;
+		const std::string path = fixture::temp_path("measure.flac");
+		fixture::write(path, spec);
+
+		vr::Tags tags;
+		vr::read_tags(path, tags);
+		check_true("measure: no loudness in the tags", std::isnan(tags.track_loudness));
+
+		float loudness = 0.0f, peak = 0.0f;
+		check_true("measure: measured", vr::measure_loudness(path, loudness, peak));
+		check_true("measure: plausible loudness", loudness < 0.0f && loudness > -40.0f);
+		check_true("measure: peak found", peak > 0.1f && peak <= 1.01f);
+
+		const std::string cache = fixture::temp_path("loudness-cache.tsv");
+		remove(cache.c_str());
+		vr::set_loudness_cache_file(cache);
+
+		float got = 0.0f, got_peak = 0.0f;
+		check_true("cache: empty at first", !vr::cached_loudness(path, got, got_peak));
+		vr::store_loudness(path, loudness, peak);
+
+		/* Read back from disk, not from memory. */
+		vr::set_loudness_cache_file(cache);
+		check_true("cache: found", vr::cached_loudness(path, got, got_peak));
+		check_true("cache: same loudness", std::fabs(got - loudness) < 0.01f);
+
+		/* A changed file is measured again. */
+		std::ofstream(path, std::ios::app) << "more";
+		check_true("cache: changed file missed", !vr::cached_loudness(path, got, got_peak));
+
+		vr::set_loudness_cache_file("");
+		remove(cache.c_str());
+		remove(path.c_str());
+
+		check_true("measure: missing file fails", !vr::measure_loudness(path, loudness, peak));
 	}
 
 	return test::finish();

@@ -75,6 +75,14 @@ PlayerSettings read_player_settings(obs_data_t *settings)
 	out.fade_in_ms = (int)obs_data_get_int(settings, "fade_in_ms");
 	out.fade_out_ms = (int)obs_data_get_int(settings, "fade_out_ms");
 	out.skip_on_error = obs_data_get_bool(settings, "skip_on_error");
+
+	out.level_mode = (LevelMode)obs_data_get_int(settings, "level_mode");
+	out.level_target = (float)obs_data_get_double(settings, "level_target");
+	out.level_measure = obs_data_get_bool(settings, "level_measure");
+	out.level_no_clip = obs_data_get_bool(settings, "level_no_clip");
+
+	out.trim_silence = obs_data_get_bool(settings, "trim_silence");
+	out.trim_threshold_db = (float)obs_data_get_double(settings, "trim_threshold");
 	return out;
 }
 
@@ -95,9 +103,21 @@ void MusicSource::update(obs_data_t *settings)
 	const PlayerSettings player_settings = read_player_settings(settings);
 	const bool keep_playing = obs_data_get_bool(settings, "keep_playing_when_hidden");
 
-	post([this, player_settings, keep_playing]() {
+	DuckSettings duck;
+	duck.enabled = obs_data_get_bool(settings, "duck_enable");
+	duck.threshold_db = (float)obs_data_get_double(settings, "duck_threshold");
+	duck.depth_db = (float)obs_data_get_double(settings, "duck_depth");
+	duck.attack_ms = (int)obs_data_get_int(settings, "duck_attack_ms");
+	duck.hold_ms = (int)obs_data_get_int(settings, "duck_hold_ms");
+	duck.release_ms = (int)obs_data_get_int(settings, "duck_release_ms");
+
+	const char *trigger = obs_data_get_string(settings, "duck_source");
+	bind_duck_trigger(duck.enabled && trigger ? trigger : "");
+
+	post([this, player_settings, keep_playing, duck]() {
 		player_->set_settings(player_settings);
 		keep_playing_when_hidden_ = keep_playing;
+		ducker_.set(duck);
 	});
 }
 

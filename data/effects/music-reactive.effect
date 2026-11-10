@@ -1,0 +1,48 @@
+/*
+ * Void Radio music reactive filter: brightens, tints and fades whatever it is
+ * on, by amounts the filter works out from the music each frame. Size and
+ * shake are done with the transform, not here.
+ */
+
+uniform float4x4 ViewProj;
+uniform texture2d image;
+
+uniform float brightness; /* added to each channel, 0 = unchanged */
+uniform float4 tint;      /* rgb, and in a how far towards it */
+uniform float opacity;
+
+sampler_state def_sampler {
+	Filter = Linear;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v_in)
+{
+	VertData vert_out;
+	vert_out.pos = mul(float4(v_in.pos.xyz, 1.0), ViewProj);
+	vert_out.uv = v_in.uv;
+	return vert_out;
+}
+
+float4 PSDraw(VertData v_in) : TARGET
+{
+	float4 color = image.Sample(def_sampler, v_in.uv);
+	float3 rgb = color.rgb + brightness;
+	rgb = lerp(rgb, tint.rgb, tint.a);
+	return float4(saturate(rgb), color.a * opacity);
+}
+
+technique Draw
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader = PSDraw(v_in);
+	}
+}

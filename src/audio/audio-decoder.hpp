@@ -53,12 +53,12 @@ public:
 	AudioDecoder &operator=(const AudioDecoder &) = delete;
 
 	/* Blocking. `interrupt` must stay valid until close(). */
-	bool open(const std::string &path, bool is_url, const AudioFormat &format, const InterruptFn *interrupt,
+	bool open(const std::string &path, const AudioFormat &format, const InterruptFn *interrupt,
 		  std::string *error = nullptr);
 	void close();
 	bool is_open() const { return format_ != nullptr; }
 
-	/* 0 when the container does not say, as for a live stream. */
+	/* 0 when the container does not say. */
 	int64_t duration_ms() const { return duration_ms_; }
 	bool seekable() const { return seekable_; }
 
@@ -88,7 +88,6 @@ private:
 
 	/* Kept to reopen with when a seek fails. */
 	std::string path_;
-	bool is_url_ = false;
 	const InterruptFn *interrupt_ = nullptr;
 
 	AudioFormat out_;

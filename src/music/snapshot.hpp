@@ -43,14 +43,24 @@ struct Snapshot {
 	std::string year;
 	std::string track;
 
+	std::string album_artist;
+	std::string composer;
+	std::string comment;
+	std::string bpm;
+	std::string disc;
+	std::string codec;
+	std::string bitrate;
+	std::string samplerate;
+
 	std::string next_title;
 	std::string next_artist;
+	std::string next_album;
 
 	int index = -1; /* zero based position of the current entry */
 	int count = 0;
 
 	int64_t elapsed_ms = 0;
-	int64_t duration_ms = 0; /* 0 when unknown, as for a live stream */
+	int64_t duration_ms = 0; /* 0 when unknown */
 	bool seekable = false;
 
 	/* 0..1, already interpolated between decoder updates so the bar moves

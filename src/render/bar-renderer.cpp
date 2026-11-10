@@ -533,7 +533,7 @@ void BarRenderer::set_layer_params(const FillLayer &layer, const char *prefix, u
 	gs_effect_set_vec4(param("_color2"), &color2);
 	gs_effect_set_vec2(param("_gradient"), &gradient);
 	gs_effect_set_vec2(param("_uv_scale"), &uv_scale);
-	gs_effect_set_float(param("_opacity"), layer.opacity);
+	gs_effect_set_float(param("_opacity"), layer.opacity * opacity_);
 
 	gs_eparam_t *texture_param = param("_tex");
 	if (texture_param) {
@@ -583,6 +583,7 @@ void BarRenderer::render(uint32_t width, uint32_t height)
 		vec4_from_rgba_srgb(&border_color, border);
 	else
 		vec4_from_rgba(&border_color, border);
+	border_color.w *= opacity_;
 
 	const bool sweeping = idle_ && idle_mode_ == IdleMode::Sweep;
 

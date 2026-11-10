@@ -20,6 +20,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 
 #include "music/playlist.hpp"
 
+#include <atomic>
 #include <condition_variable>
 #include <functional>
 #include <mutex>
@@ -59,8 +60,10 @@ public:
 	/* Replaces any rebuild that has not started yet. */
 	void rebuild(PlaylistConfig config);
 
-	/* Queues one tag read; the newest request wins. */
-	void read_tags_for(const std::string &path);
+	/* Queues one tag read; the newest request wins. With `measure`, a file
+	 * whose tags give no loudness is measured too: its tags are handed
+	 * over first, marked as measuring, then again once it is measured. */
+	void read_tags_for(const std::string &path, bool measure = false);
 
 	/* Stops the thread. Callbacks never run after this returns. */
 	void shutdown();
@@ -78,6 +81,8 @@ private:
 	bool rebuild_pending_ = false;
 	PlaylistConfig config_;
 	std::string tags_path_;
+	bool tags_measure_ = false;
+	std::atomic<bool> abort_{false};
 
 	std::thread thread_;
 };

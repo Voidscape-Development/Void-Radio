@@ -58,8 +58,12 @@ target_sources(
     src/audio/audio-decoder.cpp
     src/audio/audio-decoder.hpp
     src/audio/audio-format.hpp
+    src/audio/beat-detector.cpp
+    src/audio/beat-detector.hpp
     src/audio/deck.hpp
     src/audio/ffmpeg-util.cpp
+    src/audio/loudness.cpp
+    src/audio/loudness.hpp
     src/audio/ffmpeg-util.hpp
     src/audio/ring-buffer.cpp
     src/audio/ring-buffer.hpp
@@ -67,16 +71,25 @@ target_sources(
     src/audio/stream-deck.hpp
     src/filters/music-info-filter.cpp
     src/filters/music-info-filter.hpp
+    src/filters/music-reactive-filter.cpp
+    src/filters/music-reactive-filter.hpp
+    src/integrations/websocket.cpp
+    src/integrations/websocket.hpp
     src/music/album-art.cpp
     src/music/album-art.hpp
     src/music/command-queue.hpp
+    src/music/ducker.cpp
+    src/music/ducker.hpp
     src/music/gain-envelope.cpp
     src/music/gain-envelope.hpp
     src/music/library-worker.cpp
     src/music/library-worker.hpp
+    src/music/loudness-scan.cpp
+    src/music/loudness-scan.hpp
     src/music/music-api.cpp
     src/music/music-api.hpp
     src/music/music-link.cpp
+    src/music/music-source-duck.cpp
     src/music/music-source-info.cpp
     src/music/music-source-settings.cpp
     src/music/music-source.cpp
@@ -120,7 +133,14 @@ if(ENABLE_QT)
       src/sources/music-widget/widget-defaults.cpp
       src/sources/music-widget/widget-design.cpp
       src/sources/music-widget/widget-design.hpp
+      src/sources/music-widget/spectrum.cpp
+      src/sources/music-widget/spectrum.hpp
       src/sources/music-widget/widget-draw.cpp
+      src/sources/music-widget/widget-extras.cpp
+      src/sources/music-widget/widget-motion.cpp
+      src/sources/music-widget/widget-palette.cpp
+      src/sources/music-widget/widget-palette.hpp
+      src/sources/music-widget/widget-visualizer.cpp
       src/sources/music-widget/widget-layout.cpp
       src/sources/music-widget/widget-layout.hpp
       src/sources/music-widget/widget-properties.cpp
