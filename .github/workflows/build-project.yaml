@@ -177,7 +177,7 @@ jobs:
 
   unit-tests:
     name: Unit Tests 🧪
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     needs: check-event
     defaults:
       run:
@@ -188,8 +188,13 @@ jobs:
       - name: Install Dependencies 🛍️
         run: |
           : Install Dependencies 🛍️
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          # The tests build against libobs, so they need OBS Studio 33 from the OBS PPA rather
+          # than the distribution package. The PPA only publishes plain amd64 builds, so read
+          # its amd64 index (see .github/scripts/utils.zsh/setup_ubuntu).
+          apt_variant_args=(-o APT::Architecture-Variants=amd64)
+          sudo add-apt-repository --yes ppa:obsproject/obs-studio
+          sudo apt-get "${apt_variant_args[@]}" update
+          sudo apt-get "${apt_variant_args[@]}" install -y --no-install-recommends \
             cmake \
             ninja-build \
             pkg-config \
@@ -197,7 +202,7 @@ jobs:
             libavformat-dev \
             libavutil-dev \
             libswresample-dev \
-            libobs-dev \
+            obs-studio \
             qt6-base-dev
 
       - name: Build and Run Tests 🧪
