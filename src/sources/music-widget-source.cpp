@@ -110,7 +110,7 @@ static void widget_destroy(void *data)
 		gs_texture_destroy(widget->previous);
 
 	if (widget->background.image_valid)
-		vr_image_file_free(&widget->background.image);
+		gs_image_file_ex_free(&widget->background.image);
 
 	destroy_extras(widget);
 

@@ -279,23 +279,13 @@ same fields as `GetNowPlaying`.
 
 ## Installing
 
-Each release ships two sets of files. Pick the one that matches your OBS Studio version: a build
-only loads in the OBS version line it was built for, because OBS Studio 33 removed image APIs the
-older builds link against.
+Void Radio requires OBS Studio 33 or newer.
 
-| OBS Studio | Windows | macOS | Ubuntu |
-|---|---|---|---|
-| 32 and earlier | `void-radio-<ver>-windows-x64.zip` / `-Portable.zip` | `void-radio-<ver>-macos-universal.pkg` | `void-radio-<ver>-x86_64-linux-gnu.deb` (24.04) |
-| 33+ | `void-radio-<ver>-windows-x64-obs33.zip` / `-obs33-Portable.zip` | `void-radio-<ver>-macos-universal-obs33.pkg` | `void-radio-<ver>-x86_64-linux-gnu-obs33.deb` (26.04) |
-
-On Windows, the OBS 33+ files use the new third-party plugin layout, so OBS does not flag the
-plugin as Legacy:
-
-* **Installed OBS:** extract `void-radio-<ver>-windows-x64-obs33.zip` into
-  `C:\ProgramData\obs-studio\plugins\`, giving `...\plugins\void-radio\void-radio.dll` and
-  `...\plugins\void-radio\data\`.
-* **Portable OBS:** extract `void-radio-<ver>-windows-x64-obs33-Portable.zip` into the OBS folder,
-  giving `<OBS folder>\plugins\void-radio\`.
+* **Windows:** extract `void-radio-<ver>-windows-x64.zip` into `C:\ProgramData\obs-studio\plugins\`,
+  giving `...\plugins\void-radio\void-radio.dll` and `...\plugins\void-radio\data\`. For a portable
+  OBS, extract it into the `plugins` folder inside the OBS folder instead.
+* **macOS:** open `void-radio-<ver>-macos-universal.pkg`.
+* **Ubuntu 26.04:** install `void-radio-<ver>-x86_64-linux-gnu.deb`.
 
 If you are upgrading from an older install, remove the old copy from `C:\Program Files\obs-studio\obs-plugins\64bit\`
 or `C:\ProgramData\obs-studio\plugins\void-radio\bin\64bit\`.
@@ -308,9 +298,9 @@ details.
 
 | Platform | Toolchain |
 |---|---|
-| Windows | Visual Studio 17 2022, CMake 3.30.5 |
-| macOS | Xcode 16.0, CMake 3.30.5 |
-| Ubuntu 24.04 | CMake 3.28.3, `ninja-build`, `pkg-config`, `build-essential`, FFmpeg development packages |
+| Windows | Visual Studio 18 2026, CMake 3.30.5 |
+| macOS | Xcode 26.5, CMake 3.30.5 |
+| Ubuntu 26.04 | CMake 3.28.3, `ninja-build`, `pkg-config`, `build-essential`, FFmpeg development packages |
 
 ```sh
 cmake --preset ubuntu-x86_64   # or windows-x64 / macos
@@ -324,22 +314,6 @@ the same FFmpeg OBS itself runs on, so nothing extra ships with the plugin.
 
 How the code is laid out, which thread owns what, and where to make a given change is described
 in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-
-### Building for OBS Studio 33+
-
-Each preset has an `-obs33` twin (`windows-x64-obs33`, `macos-obs33`, `ubuntu-x86_64-obs33`, and
-the `-ci-` equivalents). They build the same sources against the OBS 33 SDK pinned under
-`sdkVariants.obs33` in `buildspec.json`, in their own build and `.deps_obs33` directories. The
-CI scripts pick these up when `OBS_SDK_VARIANT=obs33` is set.
-
-| Platform | Toolchain (OBS 33+) |
-|---|---|
-| Windows | Visual Studio 18 2026, Windows SDK 10.0.26100 |
-| macOS | Xcode 26.5 |
-| Ubuntu 26.04 | `obs-studio` 33+ from the OBS PPA |
-
-On Windows the OBS 33+ build installs as `void-radio/void-radio.dll` + `void-radio/data/`
-(the new layout) instead of `void-radio/bin/64bit/`.
 
 The plugin needs Qt 6 for the Music Widget, which draws its own glyphs and decodes its own cover
 art, and both Qt 6 and `obs-frontend-api` for the dock. Both are on by default and provided by

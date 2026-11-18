@@ -66,7 +66,7 @@ static void draw_background(MusicWidget *widget)
 	case BackgroundType::Image:
 		if (background.image_valid) {
 			params.fill_mode = 2;
-			params.texture = vr_image_file_base(background.image).texture;
+			params.texture = background.image.texture;
 			params.color = 0xFFFFFFFF;
 		}
 		break;

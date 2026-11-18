@@ -10,6 +10,7 @@
       "name": "template",
       "hidden": true,
       "cacheVariables": {
+        "ENABLE_BUILD_LEGACY": false,
         "ENABLE_FRONTEND_API": true,
         "ENABLE_QT": true
       }
@@ -17,7 +18,7 @@
     {
       "name": "macos",
       "displayName": "macOS Universal",
-      "description": "Build for macOS 12.0+ (Universal binary)",
+      "description": "Build for macOS 13.0+ (Universal binary)",
       "inherits": ["template"],
       "binaryDir": "${sourceDir}/build_macos",
       "condition": {
@@ -28,7 +29,7 @@
       "generator": "Xcode",
       "warnings": {"dev": true, "deprecated": true},
       "cacheVariables": {
-        "CMAKE_OSX_DEPLOYMENT_TARGET": "12.0",
+        "CMAKE_OSX_DEPLOYMENT_TARGET": "13.0",
         "CMAKE_OSX_ARCHITECTURES": "arm64;x86_64",
         "CODESIGN_IDENTITY": "$penv{CODESIGN_IDENT}",
         "CODESIGN_TEAM": "$penv{CODESIGN_TEAM}"
@@ -38,7 +39,7 @@
       "name": "macos-ci",
       "inherits": ["macos"],
       "displayName": "macOS Universal CI build",
-      "description": "Build for macOS 12.0+ (Universal binary) for CI",
+      "description": "Build for macOS 13.0+ (Universal binary) for CI",
       "generator": "Xcode",
       "cacheVariables": {
         "CMAKE_COMPILE_WARNING_AS_ERROR": true,
@@ -56,8 +57,8 @@
         "lhs": "${hostSystemName}",
         "rhs": "Windows"
       },
-      "generator": "Visual Studio 17 2022",
-      "architecture": "x64,version=10.0.22621",
+      "generator": "Visual Studio 18 2026",
+      "architecture": "x64,version=10.0.26100",
       "warnings": {"dev": true, "deprecated": true}
     },
     {
@@ -92,69 +93,6 @@
       "inherits": ["ubuntu-x86_64"],
       "displayName": "Ubuntu x86_64 CI build",
       "description": "Build for Ubuntu x86_64 on CI",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-        "CMAKE_COMPILE_WARNING_AS_ERROR": true,
-        "ENABLE_CCACHE": true
-      }
-    },
-    {
-      "name": "macos-obs33",
-      "displayName": "macOS Universal (OBS 33+)",
-      "description": "Build for OBS Studio 33+ on macOS 13.0+ (Universal binary)",
-      "inherits": ["macos"],
-      "binaryDir": "${sourceDir}/build_macos_obs33",
-      "cacheVariables": {
-        "OBS_SDK_VARIANT": "obs33",
-        "CMAKE_OSX_DEPLOYMENT_TARGET": "13.0"
-      }
-    },
-    {
-      "name": "macos-ci-obs33",
-      "inherits": ["macos-obs33"],
-      "displayName": "macOS Universal CI build (OBS 33+)",
-      "description": "Build for OBS Studio 33+ on macOS 13.0+ (Universal binary) for CI. Uses Xcode's own compiler: Xcode 26 does not recognize the ccache launcher.",
-      "cacheVariables": {
-        "CMAKE_COMPILE_WARNING_AS_ERROR": true,
-        "ENABLE_CCACHE": false
-      }
-    },
-    {
-      "name": "windows-x64-obs33",
-      "displayName": "Windows x64 (OBS 33+)",
-      "description": "Build for OBS Studio 33+ on Windows x64",
-      "inherits": ["windows-x64"],
-      "binaryDir": "${sourceDir}/build_x64_obs33",
-      "generator": "Visual Studio 18 2026",
-      "architecture": "x64,version=10.0.26100.0",
-      "cacheVariables": {
-        "OBS_SDK_VARIANT": "obs33"
-      }
-    },
-    {
-      "name": "windows-ci-x64-obs33",
-      "inherits": ["windows-x64-obs33"],
-      "displayName": "Windows x64 CI build (OBS 33+)",
-      "description": "Build for OBS Studio 33+ on Windows x64 on CI",
-      "cacheVariables": {
-        "CMAKE_COMPILE_WARNING_AS_ERROR": true
-      }
-    },
-    {
-      "name": "ubuntu-x86_64-obs33",
-      "displayName": "Ubuntu x86_64 (OBS 33+)",
-      "description": "Build for OBS Studio 33+ on Ubuntu x86_64",
-      "inherits": ["ubuntu-x86_64"],
-      "binaryDir": "${sourceDir}/build_x86_64_obs33",
-      "cacheVariables": {
-        "OBS_SDK_VARIANT": "obs33"
-      }
-    },
-    {
-      "name": "ubuntu-ci-x86_64-obs33",
-      "inherits": ["ubuntu-x86_64-obs33"],
-      "displayName": "Ubuntu x86_64 CI build (OBS 33+)",
-      "description": "Build for OBS Studio 33+ on Ubuntu x86_64 on CI",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "CMAKE_COMPILE_WARNING_AS_ERROR": true,
@@ -203,48 +141,6 @@
       "configurePreset": "ubuntu-ci-x86_64",
       "displayName": "Ubuntu x86_64 CI",
       "description": "Ubuntu CI build for x86_64",
-      "configuration": "RelWithDebInfo"
-    },
-    {
-      "name": "macos-obs33",
-      "configurePreset": "macos-obs33",
-      "displayName": "macOS Universal (OBS 33+)",
-      "description": "macOS build for Universal architectures (OBS 33+)",
-      "configuration": "RelWithDebInfo"
-    },
-    {
-      "name": "macos-ci-obs33",
-      "configurePreset": "macos-ci-obs33",
-      "displayName": "macOS Universal CI (OBS 33+)",
-      "description": "macOS CI build for Universal architectures (OBS 33+)",
-      "configuration": "RelWithDebInfo"
-    },
-    {
-      "name": "windows-x64-obs33",
-      "configurePreset": "windows-x64-obs33",
-      "displayName": "Windows x64 (OBS 33+)",
-      "description": "Windows build for x64 (OBS 33+)",
-      "configuration": "RelWithDebInfo"
-    },
-    {
-      "name": "windows-ci-x64-obs33",
-      "configurePreset": "windows-ci-x64-obs33",
-      "displayName": "Windows x64 CI (OBS 33+)",
-      "description": "Windows CI build for x64 (OBS 33+)",
-      "configuration": "RelWithDebInfo"
-    },
-    {
-      "name": "ubuntu-x86_64-obs33",
-      "configurePreset": "ubuntu-x86_64-obs33",
-      "displayName": "Ubuntu x86_64 (OBS 33+)",
-      "description": "Ubuntu build for x86_64 (OBS 33+)",
-      "configuration": "RelWithDebInfo"
-    },
-    {
-      "name": "ubuntu-ci-x86_64-obs33",
-      "configurePreset": "ubuntu-ci-x86_64-obs33",
-      "displayName": "Ubuntu x86_64 CI (OBS 33+)",
-      "description": "Ubuntu CI build for x86_64 (OBS 33+)",
       "configuration": "RelWithDebInfo"
     }
   ]

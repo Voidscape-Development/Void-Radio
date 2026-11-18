@@ -22,24 +22,39 @@ function(set_target_properties_plugin target)
 
   set_target_properties(${target} PROPERTIES VERSION 0 SOVERSION ${PLUGIN_VERSION})
 
-  # OBS Studio 33+ loads third-party plugins from <plugin>/<plugin>.dll with
-  # resources in <plugin>/data. The bin/64bit subfolder is flagged as Legacy
-  # there, so builds against the OBS 33+ SDK use the flat layout. Builds against
-  # the original SDK keep the layout older OBS versions expect.
-  if(OBS_SDK_VARIANT)
-    set(_binary_destination "${target}")
-  else()
-    set(_binary_destination "${target}/bin/64bit")
-  endif()
-
-  install(TARGETS ${target} RUNTIME DESTINATION "${_binary_destination}" LIBRARY DESTINATION "${_binary_destination}")
-
+  install(TARGETS ${target} RUNTIME DESTINATION "${target}" LIBRARY DESTINATION "${target}")
   install(
     FILES "$<TARGET_PDB_FILE:${target}>"
     CONFIGURATIONS RelWithDebInfo Debug Release
-    DESTINATION "${_binary_destination}"
+    DESTINATION "${target}"
     OPTIONAL
   )
+
+  if(ENABLE_BUILD_LEGACY)
+    install(
+      TARGETS ${target}
+      RUNTIME DESTINATION "${target}_legacy/${target}/bin/64bit"
+      LIBRARY DESTINATION "${target}_legacy/${target}/bin/64bit"
+    )
+    install(
+      FILES "$<TARGET_PDB_FILE:${target}>"
+      CONFIGURATIONS RelWithDebInfo Debug Release
+      DESTINATION "${target}_legacy/${target}/bin/64bit"
+      OPTIONAL
+    )
+
+    install(
+      TARGETS ${target}
+      RUNTIME DESTINATION "${target}_portable_legacy/obs-plugins/64bit"
+      LIBRARY DESTINATION "${target}_portable_legacy/obs-plugins/64bit"
+    )
+    install(
+      FILES "$<TARGET_PDB_FILE:${target}>"
+      CONFIGURATIONS RelWithDebInfo Debug Release
+      DESTINATION "${target}_portable_legacy/obs-plugins/64bit"
+      OPTIONAL
+    )
+  endif()
 
   if(TARGET plugin-support)
     target_link_libraries(${target} PRIVATE plugin-support)
@@ -86,14 +101,41 @@ function(target_install_resources target)
     endforeach()
 
     install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/data/" DESTINATION "${target}/data" USE_SOURCE_PERMISSIONS)
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/manifest.json" DESTINATION "${target}/data" COMPONENT Runtime)
+
+    if(ENABLE_BUILD_LEGACY)
+      install(
+        DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/data/"
+        DESTINATION "${target}_legacy/${target}/data"
+        USE_SOURCE_PERMISSIONS
+      )
+      install(
+        FILES "${CMAKE_CURRENT_SOURCE_DIR}/manifest.json"
+        DESTINATION "${target}_legacy/${target}/data"
+        COMPONENT Runtime
+      )
+
+      install(
+        DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/data/"
+        DESTINATION "${target}_portable_legacy/data/obs-plugins/${target}"
+        USE_SOURCE_PERMISSIONS
+      )
+      install(
+        FILES "${CMAKE_CURRENT_SOURCE_DIR}/manifest.json"
+        DESTINATION "${target}_portable_legacy/data/obs-plugins/${target}"
+        COMPONENT Runtime
+      )
+    endif()
 
     add_custom_command(
       TARGET ${target}
       POST_BUILD
-      COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/rundir/$<CONFIG>/${target}"
       COMMAND
         "${CMAKE_COMMAND}" -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/data"
-        "${CMAKE_CURRENT_BINARY_DIR}/rundir/$<CONFIG>/${target}"
+        "${CMAKE_CURRENT_BINARY_DIR}/rundir/$<CONFIG>/data"
+      COMMAND
+        "${CMAKE_COMMAND}" -E copy "${CMAKE_CURRENT_SOURCE_DIR}/manifest.json"
+        "${CMAKE_CURRENT_BINARY_DIR}/rundir/$<CONFIG>/data/manifest.json"
       COMMENT "Copy ${target} resources to rundir"
       VERBATIM
     )
@@ -109,8 +151,8 @@ function(target_add_resource target resource)
   add_custom_command(
     TARGET ${target}
     POST_BUILD
-    COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/rundir/$<CONFIG>/${target}"
-    COMMAND "${CMAKE_COMMAND}" -E copy "${resource}" "${CMAKE_CURRENT_BINARY_DIR}/rundir/$<CONFIG>/${target}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/rundir/$<CONFIG>/data"
+    COMMAND "${CMAKE_COMMAND}" -E copy "${resource}" "${CMAKE_CURRENT_BINARY_DIR}/rundir/$<CONFIG>/data"
     COMMENT "Copy ${target} resource ${resource} to rundir"
     VERBATIM
   )

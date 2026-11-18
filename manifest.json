@@ -1,0 +1,18 @@
+{
+    "display_name": "Void Radio",
+    "id": "56ab2688-3446-4f73-843b-bac702c647cd",
+    "version": "1.0.0",
+    "authors": [
+        "Voidscape Development"
+    ],
+    "name": "void-radio",
+    "description": "Music playback for OBS Studio.",
+    "long_description": "Music playback for OBS Studio: a playlist source that focuses purely on audio, a now-playing widget, a progress bar source that tracks it, and a filter that feeds now-playing text into any text source.",
+    "urls": {
+        "repository": "https://github.com/Voidscape-Development/Void-Radio",
+        "website": "https://github.com/Voidscape-Development/Void-Radio",
+        "support": "https://github.com/Voidscape-Development/Void-Radio/issues"
+    },
+    "has_banner": false,
+    "has_icon": false
+}
