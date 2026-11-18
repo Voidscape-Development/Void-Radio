@@ -51,7 +51,7 @@ void load_image(ImageElement &image, const char *path)
 
 	if (image.image_valid) {
 		obs_enter_graphics();
-		vr_image_file_free(&image.image);
+		gs_image_file_ex_free(&image.image);
 		obs_leave_graphics();
 		image.image_valid = false;
 	}
@@ -60,13 +60,13 @@ void load_image(ImageElement &image, const char *path)
 	if (image.path.empty())
 		return;
 
-	vr_image_file_init(&image.image, image.path.c_str(), GS_IMAGE_ALPHA_STRAIGHT);
+	gs_image_file_ex_init(&image.image, image.path.c_str(), GS_IMAGE_ALPHA_STRAIGHT);
 
 	obs_enter_graphics();
-	vr_image_file_init_texture(&image.image);
+	gs_image_file_ex_init_texture(&image.image);
 	obs_leave_graphics();
 
-	image.image_valid = vr_image_file_base(image.image).loaded;
+	image.image_valid = image.image.loaded;
 
 	if (!image.image_valid)
 		obs_log(LOG_WARNING, "music widget could not load image '%s'", image.path.c_str());
@@ -176,8 +176,7 @@ void draw_image(MusicWidget *widget)
 	if (!image.geometry.enabled || !image.image_valid)
 		return;
 
-	draw_texture_box(widget, vr_image_file_base(image.image).texture, image.geometry, image.fit,
-			 image.corner_radius, 0.0f, 0xFFFFFFFF);
+	draw_texture_box(widget, image.image.texture, image.geometry, image.fit, image.corner_radius, 0.0f, 0xFFFFFFFF);
 }
 
 void draw_icon(MusicWidget *widget, PlayState state)
@@ -213,7 +212,7 @@ void destroy_extras(MusicWidget *widget)
 {
 	ImageElement &image = widget->image;
 	if (image.image_valid) {
-		vr_image_file_free(&image.image);
+		gs_image_file_ex_free(&image.image);
 		image.image_valid = false;
 	}
 

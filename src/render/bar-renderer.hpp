@@ -19,7 +19,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #pragma once
 
 #include "music/snapshot.hpp"
-#include "render/image-file-compat.hpp"
+#include <graphics/image-file.h>
 
 #include <obs-module.h>
 
@@ -86,7 +86,7 @@ struct FillLayer {
 	bool follow_accent = false;
 
 	std::string image_path;
-	vr_image_file_t image = {};
+	gs_image_file_ex_t image = {};
 	bool image_valid = false;
 
 	std::string source_name;

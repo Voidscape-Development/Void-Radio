@@ -106,7 +106,7 @@ static void load_background_image(BackgroundElement &background, const char *pat
 
 	if (background.image_valid) {
 		obs_enter_graphics();
-		vr_image_file_free(&background.image);
+		gs_image_file_ex_free(&background.image);
 		obs_leave_graphics();
 		background.image_valid = false;
 	}
@@ -116,13 +116,13 @@ static void load_background_image(BackgroundElement &background, const char *pat
 	if (background.image_path.empty())
 		return;
 
-	vr_image_file_init(&background.image, background.image_path.c_str(), GS_IMAGE_ALPHA_STRAIGHT);
+	gs_image_file_ex_init(&background.image, background.image_path.c_str(), GS_IMAGE_ALPHA_STRAIGHT);
 
 	obs_enter_graphics();
-	vr_image_file_init_texture(&background.image);
+	gs_image_file_ex_init_texture(&background.image);
 	obs_leave_graphics();
 
-	background.image_valid = vr_image_file_base(background.image).loaded;
+	background.image_valid = background.image.loaded;
 
 	if (!background.image_valid)
 		obs_log(LOG_WARNING, "music widget could not load background image '%s'",

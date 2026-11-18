@@ -20,7 +20,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 
 #include "music/music-api.hpp"
 #include "render/bar-renderer.hpp"
-#include "render/image-file-compat.hpp"
+#include <graphics/image-file.h>
 #include "render/image-util.hpp"
 #include "render/text-render.hpp"
 #include "sources/music-widget/art-loader.hpp"
@@ -255,7 +255,7 @@ struct BackgroundElement {
 	int z = -100;
 
 	/* Only used by the image fill; the blurred art comes from the loader. */
-	vr_image_file_t image = {};
+	gs_image_file_ex_t image = {};
 	bool image_valid = false;
 };
 
@@ -299,7 +299,7 @@ struct ImageElement {
 	float corner_radius = 0.0f;
 
 	std::string path;
-	vr_image_file_t image = {};
+	gs_image_file_ex_t image = {};
 	bool image_valid = false;
 };
 
